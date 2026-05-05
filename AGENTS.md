@@ -1,0 +1,70 @@
+# Repository Guidelines
+
+> 本文件对本仓库后续协作生效。新会话开始后先读取本文件；若与全局规则冲突，以本文件为准。
+
+## 项目结构与模块组织
+
+当前仓库尚未提交业务源码。新增内容时按以下约定组织：
+
+- `src/`：应用或库源码。
+- `tests/`：自动化测试，目录结构应尽量镜像 `src/`。
+- `assets/`：图片、示例数据、fixtures、设计资源等静态文件。
+- `docs/`：架构说明、开发计划、任务报告、运行手册。
+- `.agents/skills/`：本仓库可用的本地 skills，按任务类型调用。
+
+构建产物不要放入源码目录；使用 `dist/`、`build/`、`target/` 等明确目录，并加入忽略规则。
+
+## 开发、构建与测试命令
+
+仓库目前没有固定构建系统。引入工具链时，优先提供稳定的根目录命令，并在 README 或本文件更新说明：
+
+- `make dev` / `npm run dev`：启动本地开发服务或 watcher。
+- `make build` / `npm run build`：生成生产构建产物。
+- `make test` / `npm test`：运行完整自动化测试。
+- `make lint` / `npm run lint`：运行格式、lint、类型检查。
+
+除非工具文档另有说明，所有命令默认从仓库根目录执行。
+
+## 任务执行流程
+
+每完成一个明确任务，按顺序处理：
+
+1. 补齐或更新测试。
+2. 运行相关测试和检查命令。
+3. 如存在 `docs/任务报告.md`，追加记录；没有该文件时，在 PR/提交说明中记录验证结果。
+4. 检查工作区变更，避免混入无关修改。
+5. 提交代码；未经用户明确要求，不执行破坏性 Git 操作。
+
+涉及 UI/UX 或特定语言/框架时，先按下方 skill 规则读取对应规范，再动手实现。
+
+## 本地 Skills 使用规则
+
+本仓库已迁入以下本地 skills：
+
+- `.agents/skills/apple-design`：涉及 Apple 风格、macOS 桌面体验、产品展示页或系统化视觉规范时使用。
+- `.agents/skills/frontend-design`：涉及页面、组件、布局、动效、响应式或可访问性时使用。
+- `.agents/skills/vercel-react-best-practices`：新增、重构或 review React / Next.js 组件、hooks、数据获取和性能相关代码时使用。
+- `.agents/skills/next-best-practices`：修改 Next.js 路由、RSC 边界、metadata、route handlers、image/font、bundling 等代码时使用。
+- `.agents/skills/skill-creator`：需要新增或维护 Codex skill 时使用。
+
+UI/UX 任务优先按 `apple-design` → `frontend-design` 的顺序读取；Next.js 任务按 `vercel-react-best-practices` → `next-best-practices` 的顺序读取。若运行环境未自动识别本地 skill，直接打开对应 `SKILL.md` 作为规范来源。
+
+## 编码风格与命名约定
+
+默认使用中文回复；技术术语、路径、命令和标识符保持原文。代码注释只解释不显然的原因，不复述代码行为。目录名优先使用小写短横线，如 `data-import/`；函数、类、变量遵循语言惯例，例如 Python `snake_case`、TypeScript `camelCase`、Rust `snake_case`。
+
+新增格式化工具后，提交前必须运行对应 formatter/linter，不使用 `--no-verify` 等方式绕过检查。
+
+## 测试规范
+
+新增功能必须配套测试；修复 bug 必须包含回归测试。测试文件命名应便于测试框架发现，例如 `test_parser.py`、`parser.test.ts`、`parser.spec.ts`。外部服务调用优先使用 mock 或 fixture，禁止把真实 API Key 写入测试或 CI。
+
+## 提交与 Pull Request
+
+当前仓库没有提交历史可参考。后续采用 Conventional Commits，例如 `feat: add import parser`、`fix: handle empty config`。每个提交聚焦一个逻辑变更。
+
+PR 需包含：变更摘要、验证命令与结果、关联 issue（如有）、用户可见变化的截图或终端输出。未完成事项必须显式列为 follow-up。
+
+## 安全与配置
+
+不要提交密钥、本地 `.env`、机器专用路径或个人凭据。需要配置时提供 `.env.example`，并在 `docs/` 或 README 中说明变量用途、默认值和是否必填。
