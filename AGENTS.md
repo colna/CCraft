@@ -4,10 +4,12 @@
 
 ## 项目结构与模块组织
 
-当前仓库尚未提交业务源码。新增内容时按以下约定组织：
+当前仓库采用 Turborepo monorepo。新增内容时按以下约定组织：
 
-- `src/`：应用或库源码。
-- `tests/`：自动化测试，目录结构应尽量镜像 `src/`。
+- `apps/devchat/`：主项目 App，使用 Tauri 2.0 + React + TypeScript + Tailwind。
+- `apps/web/`：官网 App，使用 Next.js App Router + Tailwind。
+- `packages/`：跨 app 共享包，例如 `ui`、`types`、`config`、`tsconfig`、`eslint-config`、`tailwind-config`。
+- `tests/`：跨应用或端到端测试；单个 app/package 的测试优先放在对应目录内。
 - `assets/`：图片、示例数据、fixtures、设计资源等静态文件。
 - `docs/`：架构说明、开发计划、任务报告、运行手册。
 - `.agents/skills/`：本仓库可用的本地 skills，按任务类型调用。
@@ -16,12 +18,14 @@
 
 ## 开发、构建与测试命令
 
-仓库目前没有固定构建系统。引入工具链时，优先提供稳定的根目录命令，并在 README 或本文件更新说明：
+仓库根目录统一通过 Turborepo 编排任务。引入或调整工具链时，优先提供稳定的根目录命令，并在 README 或本文件更新说明：
 
-- `make dev` / `npm run dev`：启动本地开发服务或 watcher。
-- `make build` / `npm run build`：生成生产构建产物。
-- `make test` / `npm test`：运行完整自动化测试。
-- `make lint` / `npm run lint`：运行格式、lint、类型检查。
+- `pnpm dev`：启动全部应用的本地开发服务或 watcher。
+- `pnpm dev:app`：启动主项目 App（Tauri）。
+- `pnpm dev:web`：启动官网 App（Next.js）。
+- `pnpm build`：通过 `turbo build` 生成生产构建产物。
+- `pnpm test`：通过 `turbo test` 运行完整自动化测试。
+- `pnpm lint`：通过 `turbo lint` 运行格式、lint、类型检查。
 
 除非工具文档另有说明，所有命令默认从仓库根目录执行。
 
