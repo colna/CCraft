@@ -1,0 +1,29 @@
+[package]
+name = "devchat"
+version = "0.1.0"
+description = "DevChat Tauri core"
+edition = "2021"
+
+[lib]
+name = "devchat_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[[bin]]
+name = "devchat"
+path = "src/main.rs"
+test = false
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+anyhow = "1"
+futures-util = "0.3"
+reqwest = { version = "0.12", features = ["json", "stream"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tauri = { version = "2", features = [] }
+tauri-plugin-deep-link = "2"
+tauri-plugin-http = "2"
+tauri-plugin-store = "2"
+tokio = { version = "1", features = ["full"] }
