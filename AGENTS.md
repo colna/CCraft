@@ -41,9 +41,9 @@
 
 涉及 UI/UX 或特定语言/框架时，先按下方 skill 规则读取对应规范，再动手实现。
 
-## 本地 Skills 使用规则
+## Skills 使用规则
 
-本仓库已迁入以下本地 skills：
+本仓库已迁入以下本地 UI/框架 skills：
 
 - `.agents/skills/apple-design`：涉及 Apple 风格、macOS 桌面体验、产品展示页或系统化视觉规范时使用。
 - `.agents/skills/frontend-design`：涉及页面、组件、布局、动效、响应式或可访问性时使用。
@@ -52,6 +52,33 @@
 - `.agents/skills/skill-creator`：需要新增或维护 Codex skill 时使用。
 
 UI/UX 任务优先按 `apple-design` → `frontend-design` 的顺序读取；Next.js 任务按 `vercel-react-best-practices` → `next-best-practices` 的顺序读取。若运行环境未自动识别本地 skill，直接打开对应 `SKILL.md` 作为规范来源。
+
+同时安装了 `git@github.com:addyosmani/agent-skills.git` 提供的全局工程流程 skills，位于 `~/.codex/skills/`。新会话重启 Codex 后可直接按任务类型触发；未自动识别时，直接打开对应 `SKILL.md` 作为规范来源。
+
+常用 Agent Skills 触发规则：
+
+- `using-agent-skills`：需要判断当前任务适合哪个 skill，或任务横跨多个工程阶段时使用。
+- `idea-refine`：需求还不清晰、需要收敛想法或定义问题时使用。
+- `spec-driven-development`：启动新项目、新功能、重大变更或需求不完整时使用。
+- `planning-and-task-breakdown`：已有规格说明但需要拆分任务、估算范围或安排并行工作时使用。
+- `incremental-implementation`：进入具体实现阶段时使用，保持小步提交、可验证交付。
+- `test-driven-development`：新增逻辑、修复 bug、修改行为或需要证明变更正确性时使用。
+- `code-review-and-quality`：合并前、自查代码、review 他人或 agent 产出时使用。
+- `security-and-hardening`：涉及用户输入、认证授权、敏感数据、外部 API、OAuth、Webhook、文件上传时使用。
+- `performance-optimization`：存在性能目标、疑似性能回退、Core Web Vitals 或大数据量渲染问题时使用。
+- `frontend-ui-engineering`：构建或修改用户界面时使用；与本仓库 `apple-design`、`frontend-design` 共同适用时，先读本仓库 UI skill，再读该工程实现 skill。
+- `api-and-interface-design`：设计 API、模块接口、公共类型或跨 app/package 合同时使用。
+- `documentation-and-adrs`：做架构决策、公共 API 变更、重要功能交付或需要沉淀上下文时使用。
+- `git-workflow-and-versioning`：分支、提交、版本号、变更集或发布前 Git 流程需要判断时使用。
+- `ci-cd-and-automation`：修改 CI/CD、自动化脚本、构建流水线时使用。
+- `debugging-and-error-recovery`：线上/本地错误排查、测试失败、回归定位时使用。
+- `deprecation-and-migration`：迁移框架、升级依赖、废弃旧接口或做兼容策略时使用。
+- `source-driven-development`：实现依赖外部文档、协议、SDK 或需要按源材料验证时使用。
+- `doubt-driven-development`：高风险、不熟悉代码、需求互相冲突或存在明显不确定性时使用。
+- `browser-testing-with-devtools`：需要浏览器运行态验证、DevTools 性能/网络/可访问性检查时使用。
+- `code-simplification`：发现实现过度复杂、需要删除冗余抽象或压缩维护成本时使用。
+- `context-engineering`：任务需要整理上下文、生成项目快照或为后续 agent 保留工作记忆时使用。
+- `shipping-and-launch`：发布、上线检查、回滚计划和发布说明相关任务时使用。
 
 ## 编码风格与命名约定
 
