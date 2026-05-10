@@ -53,7 +53,7 @@
 
 UI/UX 任务优先按 `apple-design` → `frontend-design` 的顺序读取；Next.js 任务按 `vercel-react-best-practices` → `next-best-practices` 的顺序读取。若运行环境未自动识别本地 skill，直接打开对应 `SKILL.md` 作为规范来源。
 
-同时安装了 `git@github.com:addyosmani/agent-skills.git` 提供的全局工程流程 skills，位于 `~/.codex/skills/`。新会话重启 Codex 后可直接按任务类型触发；未自动识别时，直接打开对应 `SKILL.md` 作为规范来源。
+本仓库也已迁入 `git@github.com:addyosmani/agent-skills.git` 提供的工程流程 skills，位于 `.agents/skills/`。新会话重启 Codex 后可直接按任务类型触发；未自动识别时，直接打开对应 `SKILL.md` 作为规范来源。
 
 常用 Agent Skills 触发规则：
 
