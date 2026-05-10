@@ -80,6 +80,17 @@ UI/UX 任务优先按 `apple-design` → `frontend-design` 的顺序读取；Nex
 - `context-engineering`：任务需要整理上下文、生成项目快照或为后续 agent 保留工作记忆时使用。
 - `shipping-and-launch`：发布、上线检查、回滚计划和发布说明相关任务时使用。
 
+本仓库额外安装了 `https://github.com/mattpocock/skills` 中较有补充价值的 skills，作为现有工程流程的补充而非替代：
+
+- `triage`：创建/整理 issue、处理 bug 或 feature request、准备可交给后台 agent 的 issue 时使用。
+- `to-issues`：把计划、spec 或 PRD 拆成 issue tracker 上可独立领取的实施票据时使用。
+- `to-prd`：需要把当前对话上下文整理成 PRD 并发布到 issue tracker 时使用。
+- `prototype`：需要一次性原型验证数据模型、状态机、终端交互或多套 UI 方向时使用。
+- `zoom-out`：对代码区域不熟、需要先获得更高层上下文或系统位置感时使用。
+- `grill-with-docs`：需要用现有领域语言、`CONTEXT.md` 或 ADR 反向拷问方案，并同步沉淀文档时使用。
+- `grill-me`：用户希望被追问、挑战和压力测试计划/设计时使用。
+- `setup-pre-commit`：需要配置 Husky、lint-staged、Prettier、类型检查或提交前测试时使用。
+
 ## 编码风格与命名约定
 
 默认使用中文回复；技术术语、路径、命令和标识符保持原文。代码注释只解释不显然的原因，不复述代码行为。目录名优先使用小写短横线，如 `data-import/`；函数、类、变量遵循语言惯例，例如 Python `snake_case`、TypeScript `camelCase`、Rust `snake_case`。
