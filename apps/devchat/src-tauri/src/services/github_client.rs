@@ -4,7 +4,7 @@ use crate::models::{
 };
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use reqwest::header::{HeaderMap, ACCEPT, USER_AGENT};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 const MAX_TEXT_FILE_BYTES: u64 = 512 * 1024;
 
@@ -161,21 +161,197 @@ impl GitHubClient {
 
     pub async fn commit_and_push(
         &self,
-        _owner: &str,
-        _repo: &str,
-        _branch: &str,
+        owner: &str,
+        repo: &str,
+        branch: &str,
         changes: &[FileChange],
-        _message: &str,
+        message: &str,
     ) -> anyhow::Result<CommitResult> {
         anyhow::ensure!(!changes.is_empty(), "no changes selected");
-        anyhow::bail!(
-            "真实 Commit & Push 尚未接入，请按 docs/任务计划.md 的 R5.1 实现 GitHub Git Data API 提交流程"
-        )
+        let message = message.trim();
+        anyhow::ensure!(!message.is_empty(), "commit message is required");
+        let owner = owner.trim();
+        let repo = repo.trim();
+        let branch = branch.trim();
+        anyhow::ensure!(!owner.is_empty(), "repository owner is required");
+        anyhow::ensure!(!repo.is_empty(), "repository name is required");
+        anyhow::ensure!(!branch.is_empty(), "repository branch is required");
+        let prepared_changes = prepare_file_changes(changes)?;
+
+        let ref_name = format!("heads/{branch}");
+        let response = self
+            .github_get(&format!(
+                "{}/repos/{}/{}/git/ref/{}",
+                self.base_url,
+                encode_path_segment(owner),
+                encode_path_segment(repo),
+                encode_repository_ref(&ref_name)
+            ))
+            .send()
+            .await?;
+        let ref_response = github_response_for_status(response, "GitHub branch reference lookup")
+            .await?
+            .json::<GitRefResponse>()
+            .await?;
+        let head_sha = ref_response.object.sha;
+
+        let response = self
+            .github_get(&format!(
+                "{}/repos/{}/{}/git/commits/{}",
+                self.base_url,
+                encode_path_segment(owner),
+                encode_path_segment(repo),
+                encode_path_segment(&head_sha)
+            ))
+            .send()
+            .await?;
+        let head_commit = github_response_for_status(response, "GitHub head commit lookup")
+            .await?
+            .json::<GitCommitResponse>()
+            .await?;
+        let base_tree_sha = head_commit.tree.sha;
+
+        let response = self
+            .github_get(&format!(
+                "{}/repos/{}/{}/git/trees/{}",
+                self.base_url,
+                encode_path_segment(owner),
+                encode_path_segment(repo),
+                encode_path_segment(&base_tree_sha)
+            ))
+            .send()
+            .await?;
+        github_response_for_status(response, "GitHub base tree lookup")
+            .await?
+            .json::<GitTreeBaseResponse>()
+            .await?;
+
+        let mut tree_entries = Vec::new();
+        for change in prepared_changes {
+            match change {
+                PreparedFileChange::Upsert { path, content } => {
+                    let blob = self.create_blob(owner, repo, content).await?;
+                    tree_entries.push(GitTreeEntryRequest::blob(path, blob.sha));
+                }
+                PreparedFileChange::Delete { path } => {
+                    tree_entries.push(GitTreeEntryRequest::delete(path));
+                }
+                PreparedFileChange::Rename {
+                    previous_path,
+                    path,
+                    content,
+                } => {
+                    tree_entries.push(GitTreeEntryRequest::delete(previous_path));
+                    let blob = self.create_blob(owner, repo, content).await?;
+                    tree_entries.push(GitTreeEntryRequest::blob(path, blob.sha));
+                }
+            }
+        }
+
+        let response = self
+            .github_post(&format!(
+                "{}/repos/{}/{}/git/trees",
+                self.base_url,
+                encode_path_segment(owner),
+                encode_path_segment(repo)
+            ))
+            .json(&CreateTreeRequest {
+                base_tree: &base_tree_sha,
+                tree: tree_entries,
+            })
+            .send()
+            .await?;
+        let tree = github_response_for_status(response, "GitHub tree creation")
+            .await?
+            .json::<GitTreeBaseResponse>()
+            .await?;
+
+        let response = self
+            .github_post(&format!(
+                "{}/repos/{}/{}/git/commits",
+                self.base_url,
+                encode_path_segment(owner),
+                encode_path_segment(repo)
+            ))
+            .json(&CreateCommitRequest {
+                message,
+                tree: &tree.sha,
+                parents: vec![head_sha.as_str()],
+            })
+            .send()
+            .await?;
+        let commit = github_response_for_status(response, "GitHub commit creation")
+            .await?
+            .json::<GitCommitResponse>()
+            .await?;
+
+        let response = self
+            .github_patch(&format!(
+                "{}/repos/{}/{}/git/refs/{}",
+                self.base_url,
+                encode_path_segment(owner),
+                encode_path_segment(repo),
+                encode_repository_ref(&ref_name)
+            ))
+            .json(&UpdateRefRequest {
+                sha: &commit.sha,
+                force: false,
+            })
+            .send()
+            .await?;
+        github_response_for_status(response, "GitHub branch reference update").await?;
+
+        Ok(CommitResult {
+            sha: commit.sha,
+            html_url: commit.html_url,
+        })
+    }
+
+    async fn create_blob(
+        &self,
+        owner: &str,
+        repo: &str,
+        content: &str,
+    ) -> anyhow::Result<GitBlobResponse> {
+        let response = self
+            .github_post(&format!(
+                "{}/repos/{}/{}/git/blobs",
+                self.base_url,
+                encode_path_segment(owner),
+                encode_path_segment(repo)
+            ))
+            .json(&CreateBlobRequest {
+                content,
+                encoding: "utf-8",
+            })
+            .send()
+            .await?;
+
+        Ok(github_response_for_status(response, "GitHub blob creation")
+            .await?
+            .json::<GitBlobResponse>()
+            .await?)
     }
 
     fn github_get(&self, url: &str) -> reqwest::RequestBuilder {
         self.http
             .get(url)
+            .bearer_auth(&self.token)
+            .header(USER_AGENT, "DevChat")
+            .header(ACCEPT, "application/vnd.github+json")
+            .header("X-GitHub-Api-Version", "2022-11-28")
+    }
+
+    fn github_post(&self, url: &str) -> reqwest::RequestBuilder {
+        self.github_headers(self.http.post(url))
+    }
+
+    fn github_patch(&self, url: &str) -> reqwest::RequestBuilder {
+        self.github_headers(self.http.patch(url))
+    }
+
+    fn github_headers(&self, request: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+        request
             .bearer_auth(&self.token)
             .header(USER_AGENT, "DevChat")
             .header(ACCEPT, "application/vnd.github+json")
@@ -195,25 +371,77 @@ fn encode_path_segment(value: &str) -> String {
         .collect()
 }
 
-fn encode_repository_path(path: &str) -> Result<String, GitHubApiError> {
+fn encode_repository_ref(value: &str) -> String {
+    value
+        .split('/')
+        .map(encode_path_segment)
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+fn normalize_repository_path(path: &str) -> anyhow::Result<String> {
     let path = path.trim_matches('/');
-    if path.is_empty() {
-        return Err(GitHubApiError::new(
-            GitHubApiErrorCode::InvalidInput,
-            "repository file path is required",
-            None,
-        ));
+    anyhow::ensure!(!path.is_empty(), "repository file path is required");
+
+    for segment in path.split('/') {
+        anyhow::ensure!(
+            !(segment.is_empty() || segment == "." || segment == ".."),
+            "repository file path contains an unsafe segment"
+        );
     }
+
+    Ok(path.to_owned())
+}
+
+enum PreparedFileChange<'a> {
+    Upsert {
+        path: String,
+        content: &'a str,
+    },
+    Delete {
+        path: String,
+    },
+    Rename {
+        previous_path: String,
+        path: String,
+        content: &'a str,
+    },
+}
+
+fn prepare_file_changes(changes: &[FileChange]) -> anyhow::Result<Vec<PreparedFileChange<'_>>> {
+    changes
+        .iter()
+        .map(|change| {
+            let path = normalize_repository_path(&change.path)?;
+            match change.change_type.as_str() {
+                "added" | "modified" => Ok(PreparedFileChange::Upsert {
+                    path,
+                    content: &change.content,
+                }),
+                "deleted" => Ok(PreparedFileChange::Delete { path }),
+                "renamed" => {
+                    let previous_path = change.previous_path.as_deref().ok_or_else(|| {
+                        anyhow::anyhow!("renamed file change requires previousPath")
+                    })?;
+                    Ok(PreparedFileChange::Rename {
+                        previous_path: normalize_repository_path(previous_path)?,
+                        path,
+                        content: &change.content,
+                    })
+                }
+                other => anyhow::bail!("unsupported file change type: {other}"),
+            }
+        })
+        .collect()
+}
+
+fn encode_repository_path(path: &str) -> Result<String, GitHubApiError> {
+    let path = normalize_repository_path(path).map_err(|error| {
+        GitHubApiError::new(GitHubApiErrorCode::InvalidInput, error.to_string(), None)
+    })?;
 
     let mut encoded_segments = Vec::new();
     for segment in path.split('/') {
-        if segment.is_empty() || segment == "." || segment == ".." {
-            return Err(GitHubApiError::new(
-                GitHubApiErrorCode::InvalidInput,
-                "repository file path contains an unsafe segment",
-                None,
-            ));
-        }
         encoded_segments.push(encode_path_segment(segment));
     }
 
@@ -243,6 +471,25 @@ async fn github_error_from_response(response: reqwest::Response) -> GitHubApiErr
 
     GitHubApiError::new(code, message, Some(status.as_u16()))
         .with_retry_after(parse_retry_after_seconds(&headers))
+}
+
+async fn github_response_for_status(
+    response: reqwest::Response,
+    action: &str,
+) -> anyhow::Result<reqwest::Response> {
+    if response.status().is_success() {
+        return Ok(response);
+    }
+
+    let status = response.status();
+    let message = response
+        .json::<GitHubErrorResponse>()
+        .await
+        .ok()
+        .and_then(|body| body.message)
+        .unwrap_or_else(|| format!("GitHub API returned HTTP {}", status.as_u16()));
+
+    anyhow::bail!("{action} failed ({}): {message}", status.as_u16());
 }
 
 fn is_rate_limited(status: u16, headers: &HeaderMap, message: &str) -> bool {
@@ -418,6 +665,92 @@ struct GitHubContentResponse {
     content: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+struct GitRefResponse {
+    object: GitRefObject,
+}
+
+#[derive(Debug, Deserialize)]
+struct GitRefObject {
+    sha: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct GitCommitResponse {
+    sha: String,
+    tree: GitCommitTree,
+    html_url: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GitCommitTree {
+    sha: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct GitTreeBaseResponse {
+    sha: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct GitBlobResponse {
+    sha: String,
+}
+
+#[derive(Debug, Serialize)]
+struct CreateBlobRequest<'a> {
+    content: &'a str,
+    encoding: &'a str,
+}
+
+#[derive(Debug, Serialize)]
+struct CreateTreeRequest<'a> {
+    base_tree: &'a str,
+    tree: Vec<GitTreeEntryRequest>,
+}
+
+#[derive(Debug, Serialize)]
+struct GitTreeEntryRequest {
+    path: String,
+    mode: &'static str,
+    #[serde(rename = "type")]
+    kind: &'static str,
+    sha: Option<String>,
+}
+
+impl GitTreeEntryRequest {
+    fn blob(path: String, sha: String) -> Self {
+        Self {
+            path,
+            mode: "100644",
+            kind: "blob",
+            sha: Some(sha),
+        }
+    }
+
+    fn delete(path: String) -> Self {
+        Self {
+            path,
+            mode: "100644",
+            kind: "blob",
+            sha: None,
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+struct CreateCommitRequest<'a> {
+    message: &'a str,
+    tree: &'a str,
+    parents: Vec<&'a str>,
+}
+
+#[derive(Debug, Serialize)]
+struct UpdateRefRequest<'a> {
+    sha: &'a str,
+    force: bool,
+}
+
 impl From<GitHubRepo> for Repository {
     fn from(repo: GitHubRepo) -> Self {
         Self {
@@ -468,7 +801,7 @@ mod tests {
     use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
     use std::net::SocketAddr;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
-    use tokio::net::TcpListener;
+    use tokio::net::{TcpListener, TcpStream};
 
     #[tokio::test]
     async fn lists_repositories_from_github_api() {
@@ -700,18 +1033,271 @@ size 84977953\n";
     }
 
     #[tokio::test]
-    async fn reports_commit_adapter_as_not_implemented_for_selected_changes() {
-        let client = GitHubClient::new("token");
+    async fn commits_selected_changes_through_github_git_data_api() {
+        let addr = spawn_github_sequence_server(vec![
+            ExpectedGitHubResponse::ok(r#"{ "object": { "sha": "head-sha" } }"#, |request| {
+                assert!(
+                    request.starts_with("GET /repos/colna/ccraft/git/ref/heads/feature/mobile ")
+                );
+                assert!(request
+                    .to_lowercase()
+                    .contains("authorization: bearer ghp_test"));
+            }),
+            ExpectedGitHubResponse::ok(
+                r#"{
+                    "sha": "head-sha",
+                    "tree": { "sha": "base-tree" },
+                    "html_url": "https://github.com/colna/ccraft/commit/head-sha"
+                }"#,
+                |request| {
+                    assert!(request.starts_with("GET /repos/colna/ccraft/git/commits/head-sha "));
+                },
+            ),
+            ExpectedGitHubResponse::ok(r#"{ "sha": "base-tree" }"#, |request| {
+                assert!(request.starts_with("GET /repos/colna/ccraft/git/trees/base-tree "));
+            }),
+            ExpectedGitHubResponse::new(201, "", r#"{ "sha": "blob-sha" }"#, |request| {
+                assert!(request.starts_with("POST /repos/colna/ccraft/git/blobs "));
+                let json = request_json(request);
+                assert_eq!(json["content"], "export const value = 1;\n");
+                assert_eq!(json["encoding"], "utf-8");
+            }),
+            ExpectedGitHubResponse::new(201, "", r#"{ "sha": "new-tree" }"#, |request| {
+                assert!(request.starts_with("POST /repos/colna/ccraft/git/trees "));
+                let json = request_json(request);
+                assert_eq!(json["base_tree"], "base-tree");
+                assert_eq!(json["tree"][0]["path"], "src/App.tsx");
+                assert_eq!(json["tree"][0]["mode"], "100644");
+                assert_eq!(json["tree"][0]["type"], "blob");
+                assert_eq!(json["tree"][0]["sha"], "blob-sha");
+            }),
+            ExpectedGitHubResponse::new(
+                201,
+                "",
+                r#"{
+                    "sha": "new-commit",
+                    "tree": { "sha": "new-tree" },
+                    "html_url": "https://github.com/colna/ccraft/commit/new-commit"
+                }"#,
+                |request| {
+                    assert!(request.starts_with("POST /repos/colna/ccraft/git/commits "));
+                    let json = request_json(request);
+                    assert_eq!(json["message"], "feat: test commit");
+                    assert_eq!(json["tree"], "new-tree");
+                    assert_eq!(json["parents"][0], "head-sha");
+                },
+            ),
+            ExpectedGitHubResponse::ok(r#"{ "object": { "sha": "new-commit" } }"#, |request| {
+                assert!(
+                    request.starts_with("PATCH /repos/colna/ccraft/git/refs/heads/feature/mobile ")
+                );
+                let json = request_json(request);
+                assert_eq!(json["sha"], "new-commit");
+                assert_eq!(json["force"], false);
+            }),
+        ])
+        .await;
+        let client = GitHubClient::with_base_url("ghp_test", &format!("http://{addr}"));
         let change = FileChange {
             path: "src/App.tsx".into(),
             previous_path: None,
-            content: "export {}".into(),
-            change_type: "modify".into(),
+            content: "export const value = 1;\n".into(),
+            change_type: "modified".into(),
         };
         let result = client
-            .commit_and_push("colna", "my-app", "main", &[change], "feat: test commit")
-            .await;
-        assert!(result.unwrap_err().to_string().contains("R5.1"));
+            .commit_and_push(
+                "colna",
+                "ccraft",
+                "feature/mobile",
+                &[change],
+                " feat: test commit ",
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(result.sha, "new-commit");
+        assert_eq!(
+            result.html_url.as_deref(),
+            Some("https://github.com/colna/ccraft/commit/new-commit")
+        );
+    }
+
+    #[tokio::test]
+    async fn creates_delete_entries_for_deleted_and_renamed_changes() {
+        let addr = spawn_github_sequence_server(vec![
+            ExpectedGitHubResponse::ok(r#"{ "object": { "sha": "head-sha" } }"#, |_| {}),
+            ExpectedGitHubResponse::ok(
+                r#"{ "sha": "head-sha", "tree": { "sha": "base-tree" }, "html_url": null }"#,
+                |_| {},
+            ),
+            ExpectedGitHubResponse::ok(r#"{ "sha": "base-tree" }"#, |_| {}),
+            ExpectedGitHubResponse::new(201, "", r#"{ "sha": "renamed-blob" }"#, |request| {
+                assert!(request.starts_with("POST /repos/colna/ccraft/git/blobs "));
+                let json = request_json(request);
+                assert_eq!(json["content"], "export const name = 'after';\n");
+            }),
+            ExpectedGitHubResponse::new(201, "", r#"{ "sha": "new-tree" }"#, |request| {
+                let json = request_json(request);
+                assert_eq!(json["tree"].as_array().unwrap().len(), 3);
+                assert_eq!(json["tree"][0]["path"], "src/Removed.ts");
+                assert!(json["tree"][0]["sha"].is_null());
+                assert_eq!(json["tree"][1]["path"], "src/Before.ts");
+                assert!(json["tree"][1]["sha"].is_null());
+                assert_eq!(json["tree"][2]["path"], "src/After.ts");
+                assert_eq!(json["tree"][2]["sha"], "renamed-blob");
+            }),
+            ExpectedGitHubResponse::new(
+                201,
+                "",
+                r#"{ "sha": "new-commit", "tree": { "sha": "new-tree" }, "html_url": null }"#,
+                |_| {},
+            ),
+            ExpectedGitHubResponse::ok(r#"{ "object": { "sha": "new-commit" } }"#, |_| {}),
+        ])
+        .await;
+        let client = GitHubClient::with_base_url("ghp_test", &format!("http://{addr}"));
+        let changes = vec![
+            FileChange {
+                path: "src/Removed.ts".into(),
+                previous_path: None,
+                content: String::new(),
+                change_type: "deleted".into(),
+            },
+            FileChange {
+                path: "src/After.ts".into(),
+                previous_path: Some("src/Before.ts".into()),
+                content: "export const name = 'after';\n".into(),
+                change_type: "renamed".into(),
+            },
+        ];
+        let result = client
+            .commit_and_push("colna", "ccraft", "main", &changes, "feat: update files")
+            .await
+            .unwrap();
+
+        assert_eq!(result.sha, "new-commit");
+    }
+
+    #[tokio::test]
+    async fn reports_ref_update_conflicts_with_readable_error() {
+        let addr = spawn_github_sequence_server(vec![
+            ExpectedGitHubResponse::ok(r#"{ "object": { "sha": "head-sha" } }"#, |_| {}),
+            ExpectedGitHubResponse::ok(
+                r#"{ "sha": "head-sha", "tree": { "sha": "base-tree" }, "html_url": null }"#,
+                |_| {},
+            ),
+            ExpectedGitHubResponse::ok(r#"{ "sha": "base-tree" }"#, |_| {}),
+            ExpectedGitHubResponse::new(201, "", r#"{ "sha": "blob-sha" }"#, |_| {}),
+            ExpectedGitHubResponse::new(201, "", r#"{ "sha": "new-tree" }"#, |_| {}),
+            ExpectedGitHubResponse::new(
+                201,
+                "",
+                r#"{ "sha": "new-commit", "tree": { "sha": "new-tree" }, "html_url": null }"#,
+                |_| {},
+            ),
+            ExpectedGitHubResponse::new(
+                409,
+                "",
+                r#"{ "message": "Reference update failed" }"#,
+                |_| {},
+            ),
+        ])
+        .await;
+        let client = GitHubClient::with_base_url("ghp_test", &format!("http://{addr}"));
+        let change = FileChange {
+            path: "src/App.tsx".into(),
+            previous_path: None,
+            content: "export const value = 2;\n".into(),
+            change_type: "modified".into(),
+        };
+        let error = client
+            .commit_and_push("colna", "ccraft", "main", &[change], "feat: conflict")
+            .await
+            .unwrap_err()
+            .to_string();
+
+        assert!(
+            error.contains("GitHub branch reference update failed (409): Reference update failed")
+        );
+    }
+
+    #[tokio::test]
+    async fn reports_commit_permission_failures_with_readable_error() {
+        let addr = spawn_github_sequence_server(vec![ExpectedGitHubResponse::new(
+            403,
+            "",
+            r#"{ "message": "Resource not accessible by personal access token" }"#,
+            |_| {},
+        )])
+        .await;
+        let client = GitHubClient::with_base_url("ghp_test", &format!("http://{addr}"));
+        let change = FileChange {
+            path: "src/App.tsx".into(),
+            previous_path: None,
+            content: "export const value = 2;\n".into(),
+            change_type: "modified".into(),
+        };
+        let error = client
+            .commit_and_push("colna", "ccraft", "main", &[change], "feat: forbidden")
+            .await
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains(
+            "GitHub branch reference lookup failed (403): Resource not accessible by personal access token"
+        ));
+        assert!(!error.contains("ghp_test"));
+    }
+
+    #[tokio::test]
+    async fn reports_missing_commit_branch_with_readable_error() {
+        let addr = spawn_github_sequence_server(vec![ExpectedGitHubResponse::new(
+            404,
+            "",
+            r#"{ "message": "Not Found" }"#,
+            |request| {
+                assert!(request.starts_with("GET /repos/colna/ccraft/git/ref/heads/missing "));
+            },
+        )])
+        .await;
+        let client = GitHubClient::with_base_url("ghp_test", &format!("http://{addr}"));
+        let change = FileChange {
+            path: "src/App.tsx".into(),
+            previous_path: None,
+            content: "export const value = 2;\n".into(),
+            change_type: "modified".into(),
+        };
+        let error = client
+            .commit_and_push("colna", "ccraft", "missing", &[change], "feat: missing")
+            .await
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("GitHub branch reference lookup failed (404): Not Found"));
+    }
+
+    #[tokio::test]
+    async fn rejects_invalid_commit_changes_before_requesting_github() {
+        let client = GitHubClient::with_base_url("ghp_test", "http://127.0.0.1:1");
+        let renamed_without_previous_path = FileChange {
+            path: "src/After.ts".into(),
+            previous_path: None,
+            content: "export {}".into(),
+            change_type: "renamed".into(),
+        };
+        let error = client
+            .commit_and_push(
+                "colna",
+                "ccraft",
+                "main",
+                &[renamed_without_previous_path],
+                "feat: rename",
+            )
+            .await
+            .unwrap_err()
+            .to_string();
+
+        assert_eq!(error, "renamed file change requires previousPath");
     }
 
     fn client_file_from_body(body: &str) -> crate::models::RepositoryFileContent {
@@ -750,30 +1336,128 @@ size 84977953\n";
     where
         F: FnOnce(&str) + Send + 'static,
     {
+        let called = std::sync::Arc::new(std::sync::Mutex::new(Some(assert_request)));
+        let called_for_response = called.clone();
+        spawn_github_sequence_server(vec![ExpectedGitHubResponse::new(
+            status,
+            extra_headers,
+            body,
+            move |request| {
+                let assert_request = called_for_response.lock().unwrap().take().unwrap();
+                assert_request(request);
+            },
+        )])
+        .await
+    }
+
+    struct ExpectedGitHubResponse {
+        status: u16,
+        extra_headers: String,
+        body: String,
+        assert_request: Box<dyn Fn(&str) + Send>,
+    }
+
+    impl ExpectedGitHubResponse {
+        fn ok(body: &str, assert_request: impl Fn(&str) + Send + 'static) -> Self {
+            Self::new(200, "", body, assert_request)
+        }
+
+        fn new(
+            status: u16,
+            extra_headers: &str,
+            body: &str,
+            assert_request: impl Fn(&str) + Send + 'static,
+        ) -> Self {
+            Self {
+                status,
+                extra_headers: extra_headers.to_owned(),
+                body: body.to_owned(),
+                assert_request: Box::new(assert_request),
+            }
+        }
+    }
+
+    async fn spawn_github_sequence_server(expected: Vec<ExpectedGitHubResponse>) -> SocketAddr {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        let body = body.to_owned();
-        let extra_headers = extra_headers.to_owned();
         tokio::spawn(async move {
-            let (mut socket, _) = listener.accept().await.unwrap();
-            let mut buffer = vec![0; 4096];
-            let bytes = socket.read(&mut buffer).await.unwrap();
-            let request = String::from_utf8_lossy(&buffer[..bytes]);
-            assert_request(&request);
+            for expected in expected {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let request = read_http_request(&mut socket).await;
+                (expected.assert_request)(&request);
 
-            let reason = match status {
-                200 => "OK",
-                403 => "Forbidden",
-                404 => "Not Found",
-                429 => "Too Many Requests",
-                _ => "Error",
-            };
-            let response = format!(
-                "HTTP/1.1 {status} {reason}\r\ncontent-type: application/json\r\n{extra_headers}content-length: {}\r\nconnection: close\r\n\r\n{body}",
-                body.len()
-            );
-            socket.write_all(response.as_bytes()).await.unwrap();
+                let reason = reason_phrase(expected.status);
+                let response = format!(
+                    "HTTP/1.1 {} {reason}\r\ncontent-type: application/json\r\n{}content-length: {}\r\nconnection: close\r\n\r\n{}",
+                    expected.status,
+                    expected.extra_headers,
+                    expected.body.len(),
+                    expected.body
+                );
+                socket.write_all(response.as_bytes()).await.unwrap();
+            }
         });
         addr
+    }
+
+    async fn read_http_request(socket: &mut TcpStream) -> String {
+        let mut buffer = Vec::new();
+        let mut chunk = [0; 1024];
+        let mut content_length = None;
+
+        loop {
+            let bytes = socket.read(&mut chunk).await.unwrap();
+            if bytes == 0 {
+                break;
+            }
+            buffer.extend_from_slice(&chunk[..bytes]);
+
+            if let Some(header_end) = header_end(&buffer) {
+                if content_length.is_none() {
+                    content_length = Some(parse_content_length(&buffer[..header_end]));
+                }
+                let body_start = header_end + 4;
+                if buffer.len() >= body_start + content_length.unwrap_or(0) {
+                    break;
+                }
+            }
+        }
+
+        String::from_utf8_lossy(&buffer).to_string()
+    }
+
+    fn header_end(buffer: &[u8]) -> Option<usize> {
+        buffer.windows(4).position(|window| window == b"\r\n\r\n")
+    }
+
+    fn parse_content_length(headers: &[u8]) -> usize {
+        String::from_utf8_lossy(headers)
+            .lines()
+            .find_map(|line| {
+                let (name, value) = line.split_once(':')?;
+                if name.eq_ignore_ascii_case("content-length") {
+                    value.trim().parse::<usize>().ok()
+                } else {
+                    None
+                }
+            })
+            .unwrap_or(0)
+    }
+
+    fn request_json(request: &str) -> serde_json::Value {
+        let (_, body) = request.split_once("\r\n\r\n").unwrap();
+        serde_json::from_str(body).unwrap()
+    }
+
+    fn reason_phrase(status: u16) -> &'static str {
+        match status {
+            200 => "OK",
+            201 => "Created",
+            403 => "Forbidden",
+            404 => "Not Found",
+            409 => "Conflict",
+            429 => "Too Many Requests",
+            _ => "Error",
+        }
     }
 }
