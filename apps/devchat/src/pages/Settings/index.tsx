@@ -1,5 +1,5 @@
 import { Github, KeyRound } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { StatusPill } from "../../components/StatusPill";
 import { invokeCommand } from "../../lib/tauri";
 import { useAIConfigStore } from "../../stores/aiConfigStore";
@@ -13,6 +13,36 @@ export function SettingsPage() {
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [githubToken, setGithubToken] = useState("");
   const [githubSaveStatus, setGithubSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [hasApiKey, setHasApiKey] = useState(false);
+  const [hasGithubToken, setHasGithubToken] = useState(false);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadSecretStatus() {
+      try {
+        const [apiKeyConfigured, githubTokenConfigured] = await Promise.all([
+          invokeCommand<boolean>("has_secret", { key: activeConfig.apiKeySecretRef }),
+          invokeCommand<boolean>("has_secret", { key: GITHUB_TOKEN_SECRET_REF })
+        ]);
+
+        if (isMounted) {
+          setHasApiKey(apiKeyConfigured);
+          setHasGithubToken(githubTokenConfigured);
+        }
+      } catch {
+        if (isMounted) {
+          setHasApiKey(false);
+          setHasGithubToken(false);
+        }
+      }
+    }
+
+    void loadSecretStatus();
+    return () => {
+      isMounted = false;
+    };
+  }, [activeConfig.apiKeySecretRef]);
 
   const saveApiKey = async () => {
     if (!apiKey.trim()) {
@@ -24,6 +54,7 @@ export function SettingsPage() {
     try {
       await invokeCommand("save_secret", { key: activeConfig.apiKeySecretRef, value: apiKey.trim() });
       setApiKey("");
+      setHasApiKey(true);
       setSaveStatus("saved");
     } catch {
       setSaveStatus("error");
@@ -40,6 +71,7 @@ export function SettingsPage() {
     try {
       await invokeCommand("save_secret", { key: GITHUB_TOKEN_SECRET_REF, value: githubToken.trim() });
       setGithubToken("");
+      setHasGithubToken(true);
       setGithubSaveStatus("saved");
     } catch {
       setGithubSaveStatus("error");
@@ -74,7 +106,7 @@ export function SettingsPage() {
         </label>
         <label className="field-block">
           <span>API Key</span>
-          <input value={activeConfig.maskedKey ?? "未配置"} readOnly />
+          <input value={hasApiKey ? "已安全保存" : "未配置"} readOnly />
         </label>
         <label className="field-block">
           <span>保存 Claude API Key</span>
@@ -85,7 +117,7 @@ export function SettingsPage() {
               setApiKey(event.target.value);
               setSaveStatus("idle");
             }}
-            placeholder="只会保存到 Rust 安全存储"
+            placeholder="只会保存到系统安全存储"
             type="password"
             value={apiKey}
           />
@@ -107,11 +139,17 @@ export function SettingsPage() {
       <section className="settings-card">
         <div className="section-heading">
           <h2><Github size={18} /> GitHub</h2>
-          <StatusPill tone={githubSaveStatus === "saved" ? "ok" : githubSaveStatus === "error" ? "warn" : "info"}>
-            {githubSaveStatus === "saving" ? "保存中" : githubSaveStatus === "saved" ? "已保存" : githubSaveStatus === "error" ? "失败" : "待配置"}
+          <StatusPill tone={githubSaveStatus === "error" ? "warn" : hasGithubToken ? "ok" : "info"}>
+            {githubSaveStatus === "saving"
+              ? "保存中"
+              : githubSaveStatus === "error"
+                ? "失败"
+                : hasGithubToken
+                  ? "已保存"
+                  : "待配置"}
           </StatusPill>
         </div>
-        <p>OAuth Proxy 接入前，先使用 GitHub Token 打通真实仓库与快照链路；token 仅保存到 Rust store。</p>
+        <p>OAuth Proxy 接入前，先使用 GitHub Token 打通真实仓库与快照链路；token 仅保存到系统安全存储。</p>
         <label className="field-block">
           <span>GitHub Token</span>
           <input

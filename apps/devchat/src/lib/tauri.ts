@@ -12,6 +12,8 @@ export async function invokeCommand<T>(command: string, args: CommandArgs = {}):
 
   switch (command) {
     case "save_secret":
+    case "has_secret":
+    case "delete_secret":
     case "test_ai_connection":
     case "github_list_repos":
     case "generate_snapshot":

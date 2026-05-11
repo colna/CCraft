@@ -18,8 +18,7 @@ const defaultConfig: AiConfig = {
   baseUrl: "http://172.245.240.135:8080",
   model: "claude-haiku-4-5-20251001",
   apiKeySecretRef: "ai.default.apiKey",
-  isActive: true,
-  maskedKey: "sk-••••333b"
+  isActive: true
 };
 
 export const useAIConfigStore = create<AiConfigState>((set, get) => ({

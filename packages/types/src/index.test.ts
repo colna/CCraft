@@ -36,11 +36,11 @@ describe("shared types", () => {
       baseUrl: "http://172.245.240.135:8080",
       model: "claude-haiku-4-5-20251001",
       apiKeySecretRef: "ai.default.apiKey",
-      isActive: true,
-      maskedKey: "sk-••••333b"
+      isActive: true
     };
 
     expect(config.provider).toBe("claude");
     expect(config).not.toHaveProperty("apiKey");
+    expect(config.maskedKey).toBeUndefined();
   });
 });

@@ -11,7 +11,8 @@ fn main() {
             devchat_lib::commands::github::github_commit_and_push,
             devchat_lib::commands::snapshot::generate_snapshot,
             devchat_lib::commands::storage::save_secret,
-            devchat_lib::commands::storage::get_secret
+            devchat_lib::commands::storage::has_secret,
+            devchat_lib::commands::storage::delete_secret
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
