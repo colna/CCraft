@@ -18,6 +18,7 @@ const snapshot: ProjectSnapshot = {
   },
   keyFiles: [],
   moduleMap: {},
+  skippedFiles: [],
   generatedAt: "unix:1778457600"
 };
 

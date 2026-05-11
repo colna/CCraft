@@ -8,7 +8,7 @@ pub use ai_config::AiConfig;
 pub use diff::{CommitResult, FileChange};
 pub use project::{
     Branch, FileTree, GitHubApiError, GitHubApiErrorCode, KeyFile, Project, ProjectSnapshot,
-    Repository, RepositoryFileContent, RepositoryFileSkipReason, TechStack,
+    Repository, RepositoryFileContent, RepositoryFileSkipReason, SkippedFile, TechStack,
 };
 pub use session::ChatMessage;
 pub use user_config::{GitHubAuthStatus, UserConfig, UserPreferences};

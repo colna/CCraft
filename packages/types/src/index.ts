@@ -85,6 +85,11 @@ export interface KeyFile {
   summary: string;
 }
 
+export interface SkippedFile {
+  path: string;
+  reason: string;
+}
+
 export interface ProjectSnapshot {
   directoryTree: Record<string, unknown>;
   techStack: {
@@ -94,6 +99,7 @@ export interface ProjectSnapshot {
   };
   keyFiles: KeyFile[];
   moduleMap: Record<string, string[]>;
+  skippedFiles: SkippedFile[];
   generatedAt: string;
 }
 

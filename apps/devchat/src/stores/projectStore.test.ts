@@ -24,6 +24,7 @@ const snapshot: ProjectSnapshot = {
   techStack: { language: "TypeScript", framework: "Tauri + React", dependencies: ["react", "tauri"] },
   keyFiles: [{ path: "src/App.tsx", role: "root component", summary: "前端根组件" }],
   moduleMap: { src: ["src/App.tsx"] },
+  skippedFiles: [],
   generatedAt: "unix:1778457600"
 };
 

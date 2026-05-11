@@ -8,6 +8,7 @@ describe("shared types", () => {
       techStack: { language: "TypeScript", framework: "React", dependencies: ["vite"] },
       keyFiles: [{ path: "src/main.tsx", role: "entry", summary: "React entry" }],
       moduleMap: { app: ["src/main.tsx"] },
+      skippedFiles: [],
       generatedAt: "2026-05-10T00:00:00.000Z"
     };
 

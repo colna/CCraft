@@ -105,6 +105,13 @@ pub struct KeyFile {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct SkippedFile {
+    pub path: String,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TechStack {
     pub language: String,
     pub framework: String,
@@ -118,6 +125,8 @@ pub struct ProjectSnapshot {
     pub tech_stack: TechStack,
     pub key_files: Vec<KeyFile>,
     pub module_map: Value,
+    #[serde(default)]
+    pub skipped_files: Vec<SkippedFile>,
     pub generated_at: String,
 }
 
