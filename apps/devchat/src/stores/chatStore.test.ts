@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { defaultConfig, useAIConfigStore } from "./aiConfigStore";
 import { useChatStore } from "./chatStore";
 
 const tauriMock = vi.hoisted(() => ({
@@ -26,12 +27,27 @@ describe("chatStore", () => {
       pendingDiffs: [],
       error: undefined
     });
+    useAIConfigStore.setState({
+      configs: [defaultConfig],
+      activeConfig: defaultConfig,
+      githubAuthStatus: "not_configured",
+      preferences: {
+        theme: "system",
+        language: "zh-CN",
+        defaultBranch: "main"
+      },
+      isLoading: false,
+      saveStatus: "idle",
+      connectionStatus: "idle",
+      error: undefined
+    });
   });
 
   it("streams real assistant chunks from the Tauri command", async () => {
     tauriMock.invokeCommand.mockImplementation(async (command: string, args: Record<string, unknown>) => {
       expect(command).toBe("chat_stream");
       expect(args.requestId).toEqual(expect.any(String));
+      expect(args.provider).toBe("claude");
       expect(args.messages).toEqual([{ role: "user", content: "帮我修复登录错误" }]);
       expect(args.systemPrompt).toContain("DevChat");
       tauriMock.listeners.get("ai-stream-chunk")?.({ requestId: args.requestId, text: "真实" });
@@ -48,6 +64,32 @@ describe("chatStore", () => {
     expect(state.pendingDiffs).toEqual([]);
     expect(state.isGenerating).toBe(false);
     expect(state.error).toBeUndefined();
+  });
+
+  it("passes the active OpenAI-compatible provider to the Tauri stream command", async () => {
+    useAIConfigStore.setState({
+      activeConfig: {
+        id: "openai-compatible",
+        name: "OpenAI-compatible",
+        provider: "openai-compatible",
+        baseUrl: "https://api.openai.com",
+        model: "gpt-4.1-mini",
+        apiKeySecretRef: "ai.openai.apiKey",
+        isActive: true
+      }
+    });
+    tauriMock.invokeCommand.mockImplementation(async (command: string, args: Record<string, unknown>) => {
+      expect(command).toBe("chat_stream");
+      expect(args.provider).toBe("openai-compatible");
+      expect(args.baseUrl).toBe("https://api.openai.com");
+      expect(args.model).toBe("gpt-4.1-mini");
+      expect(args.apiKeySecretRef).toBe("ai.openai.apiKey");
+      tauriMock.listeners.get("ai-stream-done")?.({ requestId: args.requestId });
+    });
+
+    await useChatStore.getState().sendMessage("帮我解释这个项目");
+
+    expect(useChatStore.getState().error).toBeUndefined();
   });
 
   it("does not generate fallback replies when streaming fails", async () => {

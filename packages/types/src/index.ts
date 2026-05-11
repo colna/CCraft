@@ -1,5 +1,5 @@
 export type Role = "user" | "assistant" | "system";
-export type AiProvider = "claude";
+export type AiProvider = "claude" | "openai-compatible";
 
 export interface AiConfig {
   id: string;

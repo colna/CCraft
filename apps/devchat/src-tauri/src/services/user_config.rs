@@ -174,6 +174,7 @@ fn normalize_config_id(id: &str) -> anyhow::Result<&str> {
 fn normalize_provider(provider: &str) -> anyhow::Result<String> {
     match provider.trim() {
         "claude" => Ok("claude".to_owned()),
+        "openai-compatible" => Ok("openai-compatible".to_owned()),
         _ => anyhow::bail!("unsupported AI provider"),
     }
 }
@@ -260,6 +261,48 @@ mod tests {
             config.github_auth_status,
             crate::models::GitHubAuthStatus::Configured
         );
+    }
+
+    #[test]
+    fn accepts_openai_compatible_ai_configs() {
+        let config = default_user_config(true);
+        let openai_config = AiConfig {
+            id: "openai-compatible".to_owned(),
+            name: "OpenAI-compatible".to_owned(),
+            provider: "openai-compatible".to_owned(),
+            base_url: "https://api.openai.com/".to_owned(),
+            model: "gpt-4.1-mini".to_owned(),
+            api_key_secret_ref: "ai.openai.apiKey".to_owned(),
+            is_active: true,
+        };
+
+        let config = upsert_ai_config(config, openai_config, true).unwrap();
+        let active = config
+            .ai_configs
+            .iter()
+            .find(|config| config.is_active)
+            .unwrap();
+
+        assert_eq!(active.provider, "openai-compatible");
+        assert_eq!(active.base_url, "https://api.openai.com");
+    }
+
+    #[test]
+    fn rejects_unknown_ai_providers() {
+        let config = default_user_config(true);
+        let unknown_config = AiConfig {
+            id: "unknown".to_owned(),
+            name: "Unknown".to_owned(),
+            provider: "unknown".to_owned(),
+            base_url: "https://api.example.com".to_owned(),
+            model: "unknown-model".to_owned(),
+            api_key_secret_ref: "ai.unknown.apiKey".to_owned(),
+            is_active: true,
+        };
+
+        let error = upsert_ai_config(config, unknown_config, true).unwrap_err();
+
+        assert!(error.to_string().contains("unsupported AI provider"));
     }
 
     #[test]

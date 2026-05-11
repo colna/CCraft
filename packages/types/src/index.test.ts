@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import type { AiConfig, Branch, FileDiff, GitHubApiError, ProjectSnapshot, RepositoryFileContent, UserConfig } from "./index";
+import type {
+  AiConfig,
+  AiProvider,
+  Branch,
+  FileDiff,
+  GitHubApiError,
+  ProjectSnapshot,
+  RepositoryFileContent,
+  UserConfig
+} from "./index";
 
 describe("shared types", () => {
   it("allows project snapshots with key files and module maps", () => {
@@ -41,6 +50,23 @@ describe("shared types", () => {
     };
 
     expect(config.provider).toBe("claude");
+    expect(config).not.toHaveProperty("apiKey");
+    expect(config).not.toHaveProperty("maskedKey");
+  });
+
+  it("models OpenAI-compatible AI configs without exposing plaintext API keys", () => {
+    const provider: AiProvider = "openai-compatible";
+    const config: AiConfig = {
+      id: "openai-compatible",
+      name: "OpenAI-compatible",
+      provider,
+      baseUrl: "https://api.openai.com",
+      model: "gpt-4.1-mini",
+      apiKeySecretRef: "ai.openai.apiKey",
+      isActive: true
+    };
+
+    expect(config.provider).toBe("openai-compatible");
     expect(config).not.toHaveProperty("apiKey");
     expect(config).not.toHaveProperty("maskedKey");
   });

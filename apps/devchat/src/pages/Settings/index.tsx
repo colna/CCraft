@@ -1,10 +1,15 @@
-import type { AiConfig, UserPreferences } from "@devchat/types";
+import type { AiConfig, AiProvider, UserPreferences } from "@devchat/types";
 import { Github, KeyRound, Plus, Save, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { StatusPill } from "../../components/StatusPill";
 import { invokeCommand } from "../../lib/tauri";
 import { useAIConfigStore } from "../../stores/aiConfigStore";
 import { GITHUB_TOKEN_SECRET_REF } from "../../stores/projectStore";
+
+const AI_PROVIDER_OPTIONS: Array<{ value: AiProvider; label: string }> = [
+  { value: "openai-compatible", label: "OpenAI-compatible" },
+  { value: "claude", label: "Anthropic Claude" }
+];
 
 export function SettingsPage() {
   const configs = useAIConfigStore((state) => state.configs);
@@ -84,13 +89,13 @@ export function SettingsPage() {
   };
 
   const createDraftConfig = () => {
-    const id = `claude-${crypto.randomUUID().slice(0, 8)}`;
+    const id = `openai-${crypto.randomUUID().slice(0, 8)}`;
     setDraftConfig({
       id,
-      name: "Claude 配置",
-      provider: "claude",
-      baseUrl: "https://api.anthropic.com",
-      model: activeConfig.model,
+      name: "OpenAI-compatible 配置",
+      provider: "openai-compatible",
+      baseUrl: "https://api.openai.com",
+      model: activeConfig.provider === "openai-compatible" ? activeConfig.model : "",
       apiKeySecretRef: `ai.${id}.apiKey`,
       isActive: false
     });
@@ -211,9 +216,15 @@ export function SettingsPage() {
           <select
             aria-label="AI Provider"
             value={draftConfig.provider}
-            onChange={(event) => setDraftConfig((config) => ({ ...config, provider: event.target.value as "claude" }))}
+            onChange={(event) =>
+              setDraftConfig((config) => applyProviderDefaults(config, event.target.value as AiProvider))
+            }
           >
-            <option value="claude">claude</option>
+            {AI_PROVIDER_OPTIONS.map((provider) => (
+              <option key={provider.value} value={provider.value}>
+                {provider.label}
+              </option>
+            ))}
           </select>
         </label>
         <label className="field-block">
@@ -228,9 +239,9 @@ export function SettingsPage() {
           <input value={hasApiKey ? "已安全保存" : "未配置"} readOnly />
         </label>
         <label className="field-block">
-          <span>保存 Claude API Key</span>
+          <span>保存 API Key</span>
           <input
-            aria-label="Claude API Key"
+            aria-label="AI API Key"
             autoComplete="off"
             onChange={(event) => {
               setApiKey(event.target.value);
@@ -245,6 +256,7 @@ export function SettingsPage() {
           <span>Model</span>
           <input
             value={draftConfig.model}
+            placeholder={draftConfig.provider === "openai-compatible" ? "兼容服务的模型名" : "Claude 模型名"}
             onChange={(event) => setDraftConfig((config) => ({ ...config, model: event.target.value }))}
           />
         </label>
@@ -353,4 +365,24 @@ export function SettingsPage() {
       </section>
     </section>
   );
+}
+
+function applyProviderDefaults(config: AiConfig, provider: AiProvider): AiConfig {
+  if (config.provider === provider) {
+    return config;
+  }
+
+  const model =
+    provider === "openai-compatible" && config.model.startsWith("claude-")
+      ? ""
+      : provider === "claude" && !config.model.startsWith("claude-")
+        ? ""
+        : config.model;
+
+  return {
+    ...config,
+    provider,
+    baseUrl: provider === "openai-compatible" ? "https://api.openai.com" : "https://api.anthropic.com",
+    model
+  };
 }

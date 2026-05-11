@@ -31,6 +31,15 @@ const persistedConfig: UserConfig = {
       model: "claude-sonnet-4-5",
       apiKeySecretRef: "ai.work.apiKey",
       isActive: true
+    },
+    {
+      id: "openai",
+      name: "OpenAI-compatible",
+      provider: "openai-compatible",
+      baseUrl: "https://api.openai.com",
+      model: "gpt-4.1-mini",
+      apiKeySecretRef: "ai.openai.apiKey",
+      isActive: false
     }
   ],
   githubAuthStatus: "configured",
@@ -63,7 +72,7 @@ describe("aiConfigStore", () => {
 
     const state = useAIConfigStore.getState();
     expect(tauriMock.invokeCommand).toHaveBeenCalledWith("load_user_config");
-    expect(state.configs).toHaveLength(2);
+    expect(state.configs).toHaveLength(3);
     expect(state.activeConfig.id).toBe("work");
     expect(state.githubAuthStatus).toBe("configured");
     expect(state.isLoading).toBe(false);
@@ -98,6 +107,24 @@ describe("aiConfigStore", () => {
 
     expect(useAIConfigStore.getState().connectionStatus).toBe("ok");
     expect(useAIConfigStore.getState().error).toBeUndefined();
+  });
+
+  it("passes OpenAI-compatible config fields to the Tauri connection test", async () => {
+    useAIConfigStore.setState({
+      configs: persistedConfig.aiConfigs,
+      activeConfig: persistedConfig.aiConfigs[2]!
+    });
+    tauriMock.invokeCommand.mockResolvedValue(true);
+
+    await useAIConfigStore.getState().testConnection();
+
+    expect(tauriMock.invokeCommand).toHaveBeenCalledWith("test_ai_connection", {
+      provider: "openai-compatible",
+      baseUrl: "https://api.openai.com",
+      model: "gpt-4.1-mini",
+      apiKeySecretRef: "ai.openai.apiKey"
+    });
+    expect(useAIConfigStore.getState().connectionStatus).toBe("ok");
   });
 
   it("marks the connection as failed when the Tauri command returns false", async () => {

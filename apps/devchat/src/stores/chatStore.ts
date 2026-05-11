@@ -109,6 +109,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
       await invokeCommand<void>("chat_stream", {
         requestId: streamId,
+        provider: config.provider,
         baseUrl: config.baseUrl,
         apiKeySecretRef: config.apiKeySecretRef,
         model: config.model,

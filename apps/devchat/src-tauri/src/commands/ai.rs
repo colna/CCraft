@@ -43,6 +43,7 @@ pub async fn test_ai_connection(
 pub async fn chat_stream(
     app: AppHandle,
     request_id: String,
+    provider: String,
     base_url: String,
     api_key_secret_ref: String,
     model: String,
@@ -55,7 +56,7 @@ pub async fn chat_stream(
     }
 
     let api_key = crate::commands::storage::get_secret_value(&app, &api_key_secret_ref)?;
-    let client = AiClient::new("claude", &base_url, &api_key, &model);
+    let client = AiClient::new(&provider, &base_url, &api_key, &model);
     let mut stream = client
         .chat_stream(&messages, &system_prompt)
         .await
