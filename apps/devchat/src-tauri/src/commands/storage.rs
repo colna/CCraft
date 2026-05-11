@@ -1,7 +1,8 @@
 use tauri::AppHandle;
 use tauri_plugin_store::StoreExt;
 
-use crate::models::{AiConfig, UserConfig, UserPreferences};
+use crate::models::{AiConfig, Project, UserConfig, UserPreferences};
+use crate::services::project_history::{normalize_recent_projects, upsert_recent_project};
 use crate::services::secret_store::{default_secret_store, SecretStore};
 use crate::services::user_config::{
     activate_ai_config, default_user_config, delete_ai_config as delete_user_ai_config,
@@ -11,6 +12,7 @@ use crate::services::user_config::{
 
 const SETTINGS_STORE_FILE: &str = "settings.json";
 const USER_CONFIG_STORE_KEY: &str = "userConfig";
+const RECENT_PROJECTS_STORE_KEY: &str = "recentProjects";
 
 #[tauri::command]
 pub async fn save_secret(_app: AppHandle, key: String, value: String) -> Result<(), String> {
@@ -81,6 +83,19 @@ pub async fn update_user_preferences(
     Ok(user_config)
 }
 
+#[tauri::command]
+pub async fn load_recent_projects(app: AppHandle) -> Result<Vec<Project>, String> {
+    load_recent_projects_value(&app)
+}
+
+#[tauri::command]
+pub async fn save_recent_project(app: AppHandle, project: Project) -> Result<Vec<Project>, String> {
+    let projects = load_recent_projects_value(&app)?;
+    let projects = upsert_recent_project(projects, project).map_err(|error| error.to_string())?;
+    save_recent_projects_value(&app, &projects)?;
+    Ok(projects)
+}
+
 pub fn get_secret_value(app: &AppHandle, key: &str) -> Result<String, String> {
     get_optional_secret_value(app, key)?.ok_or_else(|| "未找到对应密钥，请先保存凭据".to_owned())
 }
@@ -118,6 +133,28 @@ fn save_user_config_value(app: &AppHandle, user_config: &UserConfig) -> Result<(
         .map_err(|error| error.to_string())?;
     let value = serde_json::to_value(user_config).map_err(|error| error.to_string())?;
     store.set(USER_CONFIG_STORE_KEY.to_owned(), value);
+    store.save().map_err(|error| error.to_string())
+}
+
+fn load_recent_projects_value(app: &AppHandle) -> Result<Vec<Project>, String> {
+    let store = app
+        .store(SETTINGS_STORE_FILE)
+        .map_err(|error| error.to_string())?;
+    let projects = match store.get(RECENT_PROJECTS_STORE_KEY) {
+        Some(value) => serde_json::from_value::<Vec<Project>>(value.clone())
+            .map_err(|error| error.to_string())?,
+        None => Vec::new(),
+    };
+
+    normalize_recent_projects(projects).map_err(|error| error.to_string())
+}
+
+fn save_recent_projects_value(app: &AppHandle, projects: &[Project]) -> Result<(), String> {
+    let store = app
+        .store(SETTINGS_STORE_FILE)
+        .map_err(|error| error.to_string())?;
+    let value = serde_json::to_value(projects).map_err(|error| error.to_string())?;
+    store.set(RECENT_PROJECTS_STORE_KEY.to_owned(), value);
     store.save().map_err(|error| error.to_string())
 }
 

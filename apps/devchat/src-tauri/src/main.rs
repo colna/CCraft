@@ -17,7 +17,9 @@ fn main() {
             devchat_lib::commands::storage::save_ai_config,
             devchat_lib::commands::storage::set_active_ai_config,
             devchat_lib::commands::storage::delete_ai_config,
-            devchat_lib::commands::storage::update_user_preferences
+            devchat_lib::commands::storage::update_user_preferences,
+            devchat_lib::commands::storage::load_recent_projects,
+            devchat_lib::commands::storage::save_recent_project
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

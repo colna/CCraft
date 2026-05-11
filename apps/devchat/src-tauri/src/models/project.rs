@@ -46,3 +46,15 @@ pub struct ProjectSnapshot {
     pub module_map: Value,
     pub generated_at: String,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Project {
+    pub repo_id: String,
+    pub repo_owner: String,
+    pub repo_name: String,
+    pub repo_full_name: String,
+    pub branch: String,
+    pub snapshot: Option<ProjectSnapshot>,
+    pub last_accessed: String,
+}

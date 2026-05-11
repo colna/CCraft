@@ -32,7 +32,10 @@ describe("projectStore", () => {
     vi.mocked(invokeCommand).mockReset();
     useProjectStore.setState({
       repos: [],
+      recentProjects: [],
       currentProject: null,
+      page: 0,
+      hasMore: true,
       isLoading: false,
       error: undefined
     });
@@ -49,10 +52,28 @@ describe("projectStore", () => {
       perPage: 50
     });
     expect(useProjectStore.getState().repos).toEqual([repo]);
+    expect(useProjectStore.getState().page).toBe(1);
+    expect(useProjectStore.getState().hasMore).toBe(false);
+  });
+
+  it("loads more repositories by appending the next page", async () => {
+    const secondRepo: Repository = { ...repo, id: "43", name: "web", fullName: "colna/web" };
+    vi.mocked(invokeCommand).mockResolvedValueOnce([repo]).mockResolvedValueOnce([secondRepo]);
+
+    await useProjectStore.getState().loadRepos();
+    useProjectStore.setState({ hasMore: true });
+    await useProjectStore.getState().loadMoreRepos();
+
+    expect(invokeCommand).toHaveBeenNthCalledWith(2, "github_list_repos", {
+      tokenSecretRef: GITHUB_TOKEN_SECRET_REF,
+      page: 2,
+      perPage: 50
+    });
+    expect(useProjectStore.getState().repos.map((repo) => repo.id)).toEqual(["42", "43"]);
   });
 
   it("generates a project snapshot from the selected repository", async () => {
-    vi.mocked(invokeCommand).mockResolvedValueOnce(snapshot);
+    vi.mocked(invokeCommand).mockResolvedValueOnce(snapshot).mockResolvedValueOnce([]);
 
     const project = await useProjectStore.getState().selectProject(repo);
 
@@ -62,7 +83,33 @@ describe("projectStore", () => {
       repo: "ccraft",
       branch: "main"
     });
+    expect(invokeCommand).toHaveBeenCalledWith("save_recent_project", {
+      project: expect.objectContaining({ repoId: "42", repoFullName: "colna/ccraft" })
+    });
     expect(project.snapshot).toEqual(snapshot);
     expect(useProjectStore.getState().currentProject?.repoName).toBe("ccraft");
+  });
+
+  it("loads and reopens recent projects", async () => {
+    const project = {
+      repoId: "42",
+      repoOwner: "colna",
+      repoName: "ccraft",
+      repoFullName: "colna/ccraft",
+      branch: "main",
+      snapshot,
+      lastAccessed: "2026-05-11T00:00:00Z"
+    };
+    vi.mocked(invokeCommand).mockResolvedValueOnce([project]).mockResolvedValueOnce([project]);
+
+    await useProjectStore.getState().loadRecentProjects();
+    const reopened = await useProjectStore.getState().openRecentProject(project);
+
+    expect(invokeCommand).toHaveBeenNthCalledWith(1, "load_recent_projects");
+    expect(invokeCommand).toHaveBeenNthCalledWith(2, "save_recent_project", {
+      project: expect.objectContaining({ repoId: "42" })
+    });
+    expect(reopened.repoName).toBe("ccraft");
+    expect(useProjectStore.getState().currentProject?.repoId).toBe("42");
   });
 });

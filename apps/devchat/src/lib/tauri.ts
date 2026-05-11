@@ -22,6 +22,8 @@ export async function invokeCommand<T>(command: string, args: CommandArgs = {}):
     case "set_active_ai_config":
     case "delete_ai_config":
     case "update_user_preferences":
+    case "load_recent_projects":
+    case "save_recent_project":
     case "github_list_repos":
     case "generate_snapshot":
     case "github_commit_and_push":
