@@ -448,11 +448,18 @@ button {
   grid-template-columns: auto 1fr auto;
   align-items: center;
   gap: 10px;
+  min-width: 0;
   border: 0;
   border-radius: 8px;
   padding: 12px;
   background: #fff;
   text-align: left;
+}
+
+.file-picker button > span:nth-child(2) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .checkbox {
@@ -478,10 +485,32 @@ button {
 }
 
 .diff-viewer h2 {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 8px;
   margin: 0;
-  padding: 12px 14px;
+  padding: 10px 12px;
   font-size: 14px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.diff-viewer h2 button {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
+.diff-viewer h2 span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .diff-viewer pre {
@@ -490,6 +519,13 @@ button {
   padding: 14px;
   font-size: 12px;
   line-height: 1.55;
+}
+
+.diff-truncated {
+  margin: 0;
+  padding: 10px 14px 12px;
+  color: rgba(255, 255, 255, 0.68);
+  font-size: 12px;
 }
 
 .primary-action {
