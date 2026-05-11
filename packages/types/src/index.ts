@@ -140,10 +140,21 @@ export interface FileDiff {
 export interface Session {
   id: string;
   projectId: string;
+  repoFullName: string;
+  branch: string;
+  title: string;
   messages: Message[];
   pendingChanges: FileDiff[];
   status: "active" | "committed";
+  commitSha?: string;
+  commitUrl?: string;
   createdAt: string;
+  updatedAt: string;
+}
+
+export interface SessionHistory {
+  version: 1;
+  sessions: Session[];
 }
 
 export interface CommitResult {

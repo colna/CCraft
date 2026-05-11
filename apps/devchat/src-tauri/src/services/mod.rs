@@ -3,6 +3,7 @@ pub mod diff_parser;
 pub mod github_client;
 pub mod project_history;
 pub mod secret_store;
+pub mod session_history;
 pub mod snapshot;
 pub mod snapshot_cache;
 pub mod user_config;

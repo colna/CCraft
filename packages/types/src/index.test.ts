@@ -7,6 +7,7 @@ import type {
   GitHubApiError,
   ProjectSnapshot,
   RepositoryFileContent,
+  SessionHistory,
   UserConfig
 } from "./index";
 
@@ -146,5 +147,32 @@ describe("shared types", () => {
     expect(file.content).toContain("App");
     expect(skipped.skippedReason).toBe("too_large");
     expect(error.code).toBe("rate_limited");
+  });
+
+  it("models versioned non-sensitive session history", () => {
+    const history: SessionHistory = {
+      version: 1,
+      sessions: [{
+        id: "session-1",
+        projectId: "colna/ccraft#main",
+        repoFullName: "colna/ccraft",
+        branch: "main",
+        title: "修复登录",
+        messages: [{
+          id: "message-1",
+          role: "user",
+          content: "修复登录错误",
+          createdAt: "2026-05-11T00:00:00.000Z"
+        }],
+        pendingChanges: [],
+        status: "active",
+        createdAt: "2026-05-11T00:00:00.000Z",
+        updatedAt: "2026-05-11T00:00:00.000Z"
+      }]
+    };
+
+    expect(history.version).toBe(1);
+    expect(history.sessions[0]).not.toHaveProperty("apiKey");
+    expect(history.sessions[0]?.messages[0]).not.toHaveProperty("token");
   });
 });

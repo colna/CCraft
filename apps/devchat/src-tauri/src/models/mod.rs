@@ -10,5 +10,7 @@ pub use project::{
     Branch, FileTree, GitHubApiError, GitHubApiErrorCode, KeyFile, Project, ProjectSnapshot,
     Repository, RepositoryFileContent, RepositoryFileSkipReason, SkippedFile, TechStack,
 };
-pub use session::ChatMessage;
+pub use session::{
+    ChatMessage, ChatSession, ChatSessionStatus, SessionDiffHunk, SessionFileDiff, SessionMessage,
+};
 pub use user_config::{GitHubAuthStatus, UserConfig, UserPreferences};

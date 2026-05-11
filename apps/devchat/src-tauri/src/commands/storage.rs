@@ -2,7 +2,9 @@ use tauri::AppHandle;
 use tauri_plugin_store::StoreExt;
 
 use crate::models::{AiConfig, Project, UserConfig, UserPreferences};
-use crate::services::project_history::{normalize_recent_projects, upsert_recent_project};
+use crate::services::project_history::{
+    empty_project_history, migrate_project_history_value, upsert_recent_project,
+};
 use crate::services::secret_store::{default_secret_store, SecretStore};
 use crate::services::user_config::{
     activate_ai_config, default_user_config, delete_ai_config as delete_user_ai_config,
@@ -140,20 +142,23 @@ fn load_recent_projects_value(app: &AppHandle) -> Result<Vec<Project>, String> {
     let store = app
         .store(SETTINGS_STORE_FILE)
         .map_err(|error| error.to_string())?;
-    let projects = match store.get(RECENT_PROJECTS_STORE_KEY) {
-        Some(value) => serde_json::from_value::<Vec<Project>>(value.clone())
-            .map_err(|error| error.to_string())?,
-        None => Vec::new(),
+    let history = match store.get(RECENT_PROJECTS_STORE_KEY) {
+        Some(value) => {
+            migrate_project_history_value(value.clone()).map_err(|error| error.to_string())?
+        }
+        None => empty_project_history(),
     };
 
-    normalize_recent_projects(projects).map_err(|error| error.to_string())
+    Ok(history.projects)
 }
 
 fn save_recent_projects_value(app: &AppHandle, projects: &[Project]) -> Result<(), String> {
     let store = app
         .store(SETTINGS_STORE_FILE)
         .map_err(|error| error.to_string())?;
-    let value = serde_json::to_value(projects).map_err(|error| error.to_string())?;
+    let mut history = empty_project_history();
+    history.projects = projects.to_vec();
+    let value = serde_json::to_value(history).map_err(|error| error.to_string())?;
     store.set(RECENT_PROJECTS_STORE_KEY.to_owned(), value);
     store.save().map_err(|error| error.to_string())
 }
