@@ -74,13 +74,13 @@ mod tests {
 
     #[tokio::test]
     async fn rejects_unsupported_providers() {
-        let client = AiClient::new("openai", "http://127.0.0.1:1", "secret", "demo");
+        let client = AiClient::new("openai", "http://127.0.0.1:1", "secret", "test-model");
         assert!(!client.test_connection().await.unwrap());
     }
 
     #[tokio::test]
     async fn rejects_empty_api_keys() {
-        let client = AiClient::new("claude", "http://127.0.0.1:1", "", "demo");
+        let client = AiClient::new("claude", "http://127.0.0.1:1", "", "test-model");
         assert!(!client.test_connection().await.unwrap());
     }
 

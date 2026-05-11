@@ -1,11 +1,14 @@
 import type { FileDiff, Message } from "@devchat/types";
 import { create } from "zustand";
-import { demoDiff } from "../lib/mockData";
+
+const AI_STREAMING_NOT_CONNECTED =
+  "真实 AI 流式对话尚未接入，请按 docs/任务计划.md 的 R3.2/R3.4 实现后再生成回复。";
 
 interface ChatState {
   messages: Message[];
   isGenerating: boolean;
   pendingDiffs: FileDiff[];
+  error: string | undefined;
   sendMessage: (content: string) => Promise<void>;
   stopGeneration: () => void;
   toggleDiff: (filePath: string) => void;
@@ -15,24 +18,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
   messages: [],
   isGenerating: false,
   pendingDiffs: [],
+  error: undefined,
   sendMessage: async (content) => {
     const now = new Date().toISOString();
     const userMsg: Message = { id: crypto.randomUUID(), role: "user", content, createdAt: now };
-    set((state) => ({ messages: [...state.messages, userMsg], isGenerating: true }));
-
-    await new Promise((resolve) => window.setTimeout(resolve, 350));
-
-    const assistantMsg: Message = {
-      id: crypto.randomUUID(),
-      role: "assistant",
-      content: "我来帮你添加搜索功能。需要修改 1 个文件，已生成 Diff 供你审查。",
-      createdAt: new Date().toISOString()
-    };
-
     set((state) => ({
-      messages: [...state.messages, assistantMsg],
-      pendingDiffs: state.pendingDiffs.length > 0 ? state.pendingDiffs : [demoDiff],
-      isGenerating: false
+      messages: [...state.messages, userMsg],
+      error: AI_STREAMING_NOT_CONNECTED,
+      isGenerating: false,
+      pendingDiffs: state.pendingDiffs
     }));
   },
   stopGeneration: () => set({ isGenerating: false }),

@@ -1,5 +1,3 @@
-import { demoDiff } from "./mockData";
-
 type CommandArgs = Record<string, unknown>;
 
 const delay = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
@@ -13,8 +11,6 @@ export async function invokeCommand<T>(command: string, args: CommandArgs = {}):
   await delay(180);
 
   switch (command) {
-    case "mock_diff":
-      return [demoDiff] as T;
     case "save_secret":
     case "test_ai_connection":
     case "github_list_repos":

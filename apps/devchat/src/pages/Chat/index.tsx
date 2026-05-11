@@ -7,7 +7,7 @@ import { useAI } from "../../hooks/useAI";
 import { useProjectStore } from "../../stores/projectStore";
 
 export function ChatPage() {
-  const { messages, isGenerating, pendingDiffs, sendMessage, stopGeneration } = useAI();
+  const { messages, isGenerating, pendingDiffs, error, sendMessage, stopGeneration } = useAI();
   const currentProject = useProjectStore((state) => state.currentProject);
   const [value, setValue] = useState("");
 
@@ -44,6 +44,7 @@ export function ChatPage() {
             <span>{pendingDiffs.length} 个文件 · +{pendingDiffs.reduce((sum, diff) => sum + diff.additions, 0)}</span>
           </Link>
         )}
+        {error ? <p className="helper-text warn-text">{error}</p> : null}
       </div>
 
       <form className="chat-input" onSubmit={handleSubmit}>

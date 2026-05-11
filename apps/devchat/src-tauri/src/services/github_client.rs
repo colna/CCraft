@@ -72,17 +72,16 @@ impl GitHubClient {
 
     pub async fn commit_and_push(
         &self,
-        owner: &str,
-        repo: &str,
+        _owner: &str,
+        _repo: &str,
         _branch: &str,
         changes: &[FileChange],
         _message: &str,
     ) -> anyhow::Result<CommitResult> {
         anyhow::ensure!(!changes.is_empty(), "no changes selected");
-        Ok(CommitResult {
-            sha: "demo1234".into(),
-            html_url: Some(format!("https://github.com/{owner}/{repo}/commit/demo1234")),
-        })
+        anyhow::bail!(
+            "真实 Commit & Push 尚未接入，请按 docs/任务计划.md 的 R5.1 实现 GitHub Git Data API 提交流程"
+        )
     }
 
     fn github_get(&self, url: &str) -> reqwest::RequestBuilder {
@@ -230,7 +229,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn returns_commit_sha_for_selected_changes() {
+    async fn reports_commit_adapter_as_not_implemented_for_selected_changes() {
         let client = GitHubClient::new("token");
         let change = FileChange {
             path: "src/App.tsx".into(),
@@ -238,10 +237,9 @@ mod tests {
             change_type: "modify".into(),
         };
         let result = client
-            .commit_and_push("colna", "my-app", "main", &[change], "feat: demo")
-            .await
-            .unwrap();
-        assert_eq!(result.sha, "demo1234");
+            .commit_and_push("colna", "my-app", "main", &[change], "feat: test commit")
+            .await;
+        assert!(result.unwrap_err().to_string().contains("R5.1"));
     }
 
     async fn spawn_github_server<F>(body: &'static str, assert_request: F) -> SocketAddr

@@ -3,16 +3,6 @@ use serde_json::{json, Map, Value};
 use std::collections::BTreeMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-pub fn generate_demo_snapshot() -> ProjectSnapshot {
-    let files = vec![
-        "package.json".to_owned(),
-        "src/App.tsx".to_owned(),
-        "src/UserList.tsx".to_owned(),
-        "vite.config.ts".to_owned(),
-    ];
-    generate_snapshot_from_files(&files)
-}
-
 pub fn generate_snapshot_from_files(files: &[String]) -> ProjectSnapshot {
     ProjectSnapshot {
         directory_tree: build_directory_tree(files),
@@ -149,11 +139,17 @@ fn generated_at() -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{generate_demo_snapshot, generate_snapshot_from_files};
+    use super::generate_snapshot_from_files;
 
     #[test]
     fn includes_key_files() {
-        let snapshot = generate_demo_snapshot();
+        let files = vec![
+            "package.json".to_owned(),
+            "src/App.tsx".to_owned(),
+            "src/UserList.tsx".to_owned(),
+            "vite.config.ts".to_owned(),
+        ];
+        let snapshot = generate_snapshot_from_files(&files);
         assert!(snapshot.key_files.iter().any(|file| file.path == "src/App.tsx"));
     }
 
