@@ -1,15 +1,23 @@
 import type { Branch, Project, ProjectSnapshot, Repository } from "@devchat/types";
 import { create } from "zustand";
-import { invokeCommand } from "../lib/tauri";
+import { invokeCommand, listenCommandEvent } from "../lib/tauri";
 
 export const GITHUB_TOKEN_SECRET_REF = "github.default.token";
 const REPOS_PER_PAGE = 50;
+
+interface SnapshotProgress {
+  requestId: string;
+  phase: string;
+  percent: number;
+  message: string;
+}
 
 interface ProjectState {
   repos: Repository[];
   branches: Branch[];
   recentProjects: Project[];
   currentProject: Project | null;
+  snapshotProgress: SnapshotProgress | undefined;
   page: number;
   hasMore: boolean;
   isLoading: boolean;
@@ -20,22 +28,24 @@ interface ProjectState {
   loadBranches: () => Promise<void>;
   setProjectBranch: (branchName: string) => void;
   refreshCurrentBranch: () => Promise<boolean>;
+  refreshSnapshot: (options?: { refresh?: boolean }) => Promise<Project | null>;
   selectProject: (repo: Repository) => Promise<Project>;
   openRecentProject: (project: Project) => Promise<Project>;
 }
 
-export const useProjectStore = create<ProjectState>((set) => ({
+export const useProjectStore = create<ProjectState>((set, get) => ({
   repos: [],
   branches: [],
   recentProjects: [],
   currentProject: null,
+  snapshotProgress: undefined,
   page: 0,
   hasMore: true,
   isLoading: false,
   error: undefined,
   loadRepos: async (options) => {
     const reset = options?.reset ?? true;
-    const nextPage = reset ? 1 : useProjectStore.getState().page + 1;
+    const nextPage = reset ? 1 : get().page + 1;
     set({ isLoading: true, error: undefined });
     try {
       const repos = await invokeCommand<Repository[]>("github_list_repos", {
@@ -57,7 +67,7 @@ export const useProjectStore = create<ProjectState>((set) => ({
     }
   },
   loadMoreRepos: async () => {
-    const state = useProjectStore.getState();
+    const state = get();
     if (state.isLoading || !state.hasMore) return;
     await state.loadRepos({ reset: false });
   },
@@ -72,7 +82,7 @@ export const useProjectStore = create<ProjectState>((set) => ({
     }
   },
   loadBranches: async () => {
-    const project = useProjectStore.getState().currentProject;
+    const project = get().currentProject;
     if (!project) return;
 
     try {
@@ -81,7 +91,7 @@ export const useProjectStore = create<ProjectState>((set) => ({
         owner: project.repoOwner,
         repo: project.repoName
       });
-      const activeProject = useProjectStore.getState().currentProject;
+      const activeProject = get().currentProject;
       if (!activeProject || activeProject.repoOwner !== project.repoOwner || activeProject.repoName !== project.repoName) {
         return;
       }
@@ -96,7 +106,7 @@ export const useProjectStore = create<ProjectState>((set) => ({
     }
   },
   setProjectBranch: (branchName) => {
-    const state = useProjectStore.getState();
+    const state = get();
     const project = state.currentProject;
     if (!project) return;
 
@@ -113,7 +123,7 @@ export const useProjectStore = create<ProjectState>((set) => ({
     });
   },
   refreshCurrentBranch: async () => {
-    const project = useProjectStore.getState().currentProject;
+    const project = get().currentProject;
     if (!project) return false;
 
     try {
@@ -123,7 +133,7 @@ export const useProjectStore = create<ProjectState>((set) => ({
         repo: project.repoName,
         branch: project.branch
       });
-      const activeProject = useProjectStore.getState().currentProject;
+      const activeProject = get().currentProject;
       if (!activeProject || activeProject.repoOwner !== project.repoOwner || activeProject.repoName !== project.repoName || activeProject.branch !== project.branch) {
         return false;
       }
@@ -143,13 +153,17 @@ export const useProjectStore = create<ProjectState>((set) => ({
     }
   },
   selectProject: async (repo) => {
-    set({ isLoading: true, error: undefined, branches: [] });
+    set({ isLoading: true, error: undefined, branches: [], snapshotProgress: undefined });
+    const requestId = createRequestId();
+    const unlisten = await subscribeSnapshotProgress(requestId, set);
     try {
       const snapshot = await invokeCommand<ProjectSnapshot>("generate_snapshot", {
         tokenSecretRef: GITHUB_TOKEN_SECRET_REF,
         owner: repo.owner,
         repo: repo.name,
-        branch: repo.defaultBranch
+        branch: repo.defaultBranch,
+        refresh: false,
+        requestId
       });
       const project: Project = {
         repoId: repo.id,
@@ -161,14 +175,53 @@ export const useProjectStore = create<ProjectState>((set) => ({
         lastAccessed: new Date().toISOString()
       };
       const recentProjects = await invokeCommand<Project[]>("save_recent_project", { project });
-      set({ currentProject: project, recentProjects, branches: [], isLoading: false });
+      set({ currentProject: project, recentProjects, branches: [], snapshotProgress: undefined, isLoading: false });
       return project;
     } catch (error) {
       set({
         isLoading: false,
+        snapshotProgress: undefined,
         error: error instanceof Error ? error.message : "项目快照生成失败"
       });
       throw error;
+    } finally {
+      unlisten();
+    }
+  },
+  refreshSnapshot: async (options) => {
+    const project = get().currentProject;
+    if (!project) return null;
+
+    set({ isLoading: true, error: undefined, snapshotProgress: undefined });
+    const requestId = createRequestId();
+    const unlisten = await subscribeSnapshotProgress(requestId, set);
+    try {
+      const snapshot = await invokeCommand<ProjectSnapshot>("generate_snapshot", {
+        tokenSecretRef: GITHUB_TOKEN_SECRET_REF,
+        owner: project.repoOwner,
+        repo: project.repoName,
+        branch: project.branch,
+        cacheRef: project.branchSha ?? project.branch,
+        refresh: options?.refresh ?? false,
+        requestId
+      });
+      const updatedProject: Project = {
+        ...project,
+        snapshot,
+        lastAccessed: new Date().toISOString()
+      };
+      const recentProjects = await invokeCommand<Project[]>("save_recent_project", { project: updatedProject });
+      set({ currentProject: updatedProject, recentProjects, isLoading: false, snapshotProgress: undefined });
+      return updatedProject;
+    } catch (error) {
+      set({
+        isLoading: false,
+        snapshotProgress: undefined,
+        error: error instanceof Error ? error.message : "项目快照刷新失败"
+      });
+      return null;
+    } finally {
+      unlisten();
     }
   },
   openRecentProject: async (project) => {
@@ -178,6 +231,9 @@ export const useProjectStore = create<ProjectState>((set) => ({
       set({ currentProject: updatedProject, recentProjects, branches: [], error: undefined });
     } catch {
       set({ currentProject: updatedProject, branches: [], error: undefined });
+    }
+    if (!updatedProject.snapshot) {
+      return await get().refreshSnapshot({ refresh: false }) ?? updatedProject;
     }
     return updatedProject;
   }
@@ -189,4 +245,19 @@ function mergeRepos(existing: Repository[], incoming: Repository[]): Repository[
     repos.set(repo.id, repo);
   }
   return Array.from(repos.values());
+}
+
+async function subscribeSnapshotProgress(
+  requestId: string,
+  set: (partial: Partial<ProjectState>) => void
+) {
+  return listenCommandEvent<SnapshotProgress>("snapshot-progress", (event) => {
+    if (event.requestId === requestId) {
+      set({ snapshotProgress: event });
+    }
+  });
+}
+
+function createRequestId(): string {
+  return globalThis.crypto?.randomUUID?.() ?? `snapshot-${Date.now()}`;
 }

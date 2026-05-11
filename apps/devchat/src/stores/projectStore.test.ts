@@ -1,10 +1,11 @@
 import type { Branch, ProjectSnapshot, Repository } from "@devchat/types";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { GITHUB_TOKEN_SECRET_REF, useProjectStore } from "./projectStore";
-import { invokeCommand } from "../lib/tauri";
+import { invokeCommand, listenCommandEvent } from "../lib/tauri";
 
 vi.mock("../lib/tauri", () => ({
-  invokeCommand: vi.fn()
+  invokeCommand: vi.fn(),
+  listenCommandEvent: vi.fn(async () => vi.fn())
 }));
 
 const repo: Repository = {
@@ -37,11 +38,14 @@ const branch: Branch = {
 describe("projectStore", () => {
   beforeEach(() => {
     vi.mocked(invokeCommand).mockReset();
+    vi.mocked(listenCommandEvent).mockReset();
+    vi.mocked(listenCommandEvent).mockResolvedValue(vi.fn());
     useProjectStore.setState({
       repos: [],
       branches: [],
       recentProjects: [],
       currentProject: null,
+      snapshotProgress: undefined,
       page: 0,
       hasMore: true,
       isLoading: false,
@@ -89,7 +93,9 @@ describe("projectStore", () => {
       tokenSecretRef: GITHUB_TOKEN_SECRET_REF,
       owner: "colna",
       repo: "ccraft",
-      branch: "main"
+      branch: "main",
+      refresh: false,
+      requestId: expect.any(String)
     });
     expect(invokeCommand).toHaveBeenCalledWith("save_recent_project", {
       project: expect.objectContaining({ repoId: "42", repoFullName: "colna/ccraft" })
@@ -120,6 +126,39 @@ describe("projectStore", () => {
     });
     expect(reopened.repoName).toBe("ccraft");
     expect(useProjectStore.getState().currentProject?.repoId).toBe("42");
+  });
+
+  it("refreshes the current project snapshot with the branch sha cache ref", async () => {
+    const project = {
+      repoId: "42",
+      repoOwner: "colna",
+      repoName: "ccraft",
+      repoFullName: "colna/ccraft",
+      branch: "main",
+      branchSha: "abc123",
+      snapshot,
+      lastAccessed: "2026-05-11T00:00:00Z"
+    };
+    const refreshedSnapshot = {
+      ...snapshot,
+      generatedAt: "unix:1778459999"
+    };
+    useProjectStore.setState({ currentProject: project });
+    vi.mocked(invokeCommand).mockResolvedValueOnce(refreshedSnapshot).mockResolvedValueOnce([project]);
+
+    const refreshed = await useProjectStore.getState().refreshSnapshot({ refresh: true });
+
+    expect(invokeCommand).toHaveBeenCalledWith("generate_snapshot", {
+      tokenSecretRef: GITHUB_TOKEN_SECRET_REF,
+      owner: "colna",
+      repo: "ccraft",
+      branch: "main",
+      cacheRef: "abc123",
+      refresh: true,
+      requestId: expect.any(String)
+    });
+    expect(refreshed?.snapshot?.generatedAt).toBe("unix:1778459999");
+    expect(useProjectStore.getState().snapshotProgress).toBeUndefined();
   });
 
   it("loads branches and switches the current project branch", async () => {

@@ -157,6 +157,12 @@ button {
   gap: 12px;
 }
 
+.header-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .section-heading h2,
 .settings-card h2 {
   display: inline-flex;

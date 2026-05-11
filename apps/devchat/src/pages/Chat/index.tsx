@@ -1,4 +1,4 @@
-import { FileCode2, Send, Square } from "lucide-react";
+import { FileCode2, RefreshCw, Send, Square } from "lucide-react";
 import { useState } from "react";
 import type { FormEvent } from "react";
 import { Link } from "react-router-dom";
@@ -10,6 +10,9 @@ import { useProjectStore } from "../../stores/projectStore";
 export function ChatPage() {
   const { messages, isGenerating, pendingDiffs, error, sendMessage, stopGeneration } = useAI();
   const currentProject = useProjectStore((state) => state.currentProject);
+  const snapshotProgress = useProjectStore((state) => state.snapshotProgress);
+  const isProjectLoading = useProjectStore((state) => state.isLoading);
+  const refreshSnapshot = useProjectStore((state) => state.refreshSnapshot);
   const [value, setValue] = useState("");
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -27,11 +30,25 @@ export function ChatPage() {
           <h1>{currentProject ? `${currentProject.repoName} · ${currentProject.branch}` : "未选择项目"}</h1>
           <p>{currentProject?.snapshot?.techStack.framework ?? "选择项目后加载真实快照"}</p>
         </div>
-        <Link to="/diff" className="icon-link" aria-label="查看全部变更">
-          <FileCode2 size={20} />
-        </Link>
+        <div className="header-actions">
+          <button
+            type="button"
+            className="icon-link"
+            aria-label="刷新项目快照"
+            disabled={!currentProject || isProjectLoading}
+            onClick={() => void refreshSnapshot({ refresh: true })}
+          >
+            <RefreshCw size={20} />
+          </button>
+          <Link to="/diff" className="icon-link" aria-label="查看全部变更">
+            <FileCode2 size={20} />
+          </Link>
+        </div>
       </header>
       <BranchSelector variant="compact" />
+      {snapshotProgress ? (
+        <p className="helper-text">{snapshotProgress.message} · {snapshotProgress.percent}%</p>
+      ) : null}
 
       <div className="message-list">
         {messages.map((message) => (
