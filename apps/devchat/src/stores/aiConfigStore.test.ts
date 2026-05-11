@@ -9,14 +9,86 @@ vi.mock("../lib/tauri", () => ({
 }));
 
 import { useAIConfigStore } from "./aiConfigStore";
+import type { UserConfig } from "@devchat/types";
+
+const persistedConfig: UserConfig = {
+  version: 1,
+  aiConfigs: [
+    {
+      id: "default",
+      name: "Claude Haiku 4.5",
+      provider: "claude",
+      baseUrl: "http://172.245.240.135:8080",
+      model: "claude-haiku-4-5-20251001",
+      apiKeySecretRef: "ai.default.apiKey",
+      isActive: false
+    },
+    {
+      id: "work",
+      name: "Work Claude",
+      provider: "claude",
+      baseUrl: "https://api.anthropic.com",
+      model: "claude-sonnet-4-5",
+      apiKeySecretRef: "ai.work.apiKey",
+      isActive: true
+    }
+  ],
+  githubAuthStatus: "configured",
+  preferences: {
+    theme: "system",
+    language: "zh-CN",
+    defaultBranch: "main"
+  }
+};
 
 describe("aiConfigStore", () => {
   beforeEach(() => {
     tauriMock.invokeCommand.mockReset();
     useAIConfigStore.setState({
+      configs: [persistedConfig.aiConfigs[0]!],
+      activeConfig: persistedConfig.aiConfigs[0]!,
+      githubAuthStatus: "not_configured",
+      preferences: persistedConfig.preferences,
+      isLoading: false,
+      saveStatus: "idle",
       connectionStatus: "idle",
       error: undefined
     });
+  });
+
+  it("loads persisted non-sensitive config state", async () => {
+    tauriMock.invokeCommand.mockResolvedValue(persistedConfig);
+
+    await useAIConfigStore.getState().loadConfig();
+
+    const state = useAIConfigStore.getState();
+    expect(tauriMock.invokeCommand).toHaveBeenCalledWith("load_user_config");
+    expect(state.configs).toHaveLength(2);
+    expect(state.activeConfig.id).toBe("work");
+    expect(state.githubAuthStatus).toBe("configured");
+    expect(state.isLoading).toBe(false);
+  });
+
+  it("saves an AI config through the Tauri command and applies the returned state", async () => {
+    tauriMock.invokeCommand.mockResolvedValue(persistedConfig);
+
+    await useAIConfigStore.getState().saveConfig(persistedConfig.aiConfigs[1]!);
+
+    expect(tauriMock.invokeCommand).toHaveBeenCalledWith("save_ai_config", {
+      config: persistedConfig.aiConfigs[1]!
+    });
+    expect(useAIConfigStore.getState().activeConfig.id).toBe("work");
+    expect(useAIConfigStore.getState().saveStatus).toBe("saved");
+  });
+
+  it("activates and deletes configs through persisted commands", async () => {
+    tauriMock.invokeCommand.mockResolvedValue(persistedConfig);
+
+    await useAIConfigStore.getState().setActive("work");
+    await useAIConfigStore.getState().deleteConfig("default");
+
+    expect(tauriMock.invokeCommand).toHaveBeenNthCalledWith(1, "set_active_ai_config", { id: "work" });
+    expect(tauriMock.invokeCommand).toHaveBeenNthCalledWith(2, "delete_ai_config", { id: "default" });
   });
 
   it("marks the connection as ok when the Tauri command returns true", async () => {

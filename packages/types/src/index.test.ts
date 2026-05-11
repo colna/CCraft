@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { AiConfig, FileDiff, ProjectSnapshot } from "./index";
+import type { AiConfig, FileDiff, ProjectSnapshot, UserConfig } from "./index";
 
 describe("shared types", () => {
   it("allows project snapshots with key files and module maps", () => {
@@ -41,6 +41,32 @@ describe("shared types", () => {
 
     expect(config.provider).toBe("claude");
     expect(config).not.toHaveProperty("apiKey");
-    expect(config.maskedKey).toBeUndefined();
+    expect(config).not.toHaveProperty("maskedKey");
+  });
+
+  it("models non-sensitive persisted user config", () => {
+    const config: UserConfig = {
+      version: 1,
+      aiConfigs: [
+        {
+          id: "default",
+          name: "Claude Haiku 4.5",
+          provider: "claude",
+          baseUrl: "http://172.245.240.135:8080",
+          model: "claude-haiku-4-5-20251001",
+          apiKeySecretRef: "ai.default.apiKey",
+          isActive: true
+        }
+      ],
+      githubAuthStatus: "configured",
+      preferences: {
+        theme: "system",
+        language: "zh-CN",
+        defaultBranch: "main"
+      }
+    };
+
+    expect(config.aiConfigs[0]).not.toHaveProperty("apiKey");
+    expect(config.githubAuthStatus).toBe("configured");
   });
 });

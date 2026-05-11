@@ -12,7 +12,12 @@ fn main() {
             devchat_lib::commands::snapshot::generate_snapshot,
             devchat_lib::commands::storage::save_secret,
             devchat_lib::commands::storage::has_secret,
-            devchat_lib::commands::storage::delete_secret
+            devchat_lib::commands::storage::delete_secret,
+            devchat_lib::commands::storage::load_user_config,
+            devchat_lib::commands::storage::save_ai_config,
+            devchat_lib::commands::storage::set_active_ai_config,
+            devchat_lib::commands::storage::delete_ai_config,
+            devchat_lib::commands::storage::update_user_preferences
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

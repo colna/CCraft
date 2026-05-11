@@ -9,8 +9,9 @@ export interface AiConfig {
   model: string;
   apiKeySecretRef: string;
   isActive: boolean;
-  maskedKey?: string;
 }
+
+export type GitHubAuthStatus = "not_configured" | "configured" | "invalid" | "expired";
 
 export interface UserPreferences {
   theme: "system" | "light" | "dark";
@@ -20,8 +21,12 @@ export interface UserPreferences {
 
 export interface User {
   aiConfigs: AiConfig[];
-  githubLinked: boolean;
+  githubAuthStatus: GitHubAuthStatus;
   preferences: UserPreferences;
+}
+
+export interface UserConfig extends User {
+  version: 1;
 }
 
 export interface Repository {

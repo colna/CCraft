@@ -17,6 +17,11 @@ export async function invokeCommand<T>(command: string, args: CommandArgs = {}):
     case "delete_secret":
     case "test_ai_connection":
     case "chat_stream":
+    case "load_user_config":
+    case "save_ai_config":
+    case "set_active_ai_config":
+    case "delete_ai_config":
+    case "update_user_preferences":
     case "github_list_repos":
     case "generate_snapshot":
     case "github_commit_and_push":
