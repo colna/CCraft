@@ -1,13 +1,9 @@
-import type { FileDiff, Message, Project } from "@devchat/types";
+import type { FileDiff, Message } from "@devchat/types";
 import { create } from "zustand";
+import { buildChatMessages, buildSystemPrompt } from "../lib/promptBuilder";
 import { invokeCommand, listenCommandEvent } from "../lib/tauri";
 import { useAIConfigStore } from "./aiConfigStore";
 import { useProjectStore } from "./projectStore";
-
-type ChatCommandMessage = {
-  role: "user" | "assistant";
-  content: string;
-};
 
 type StreamChunkEvent = {
   requestId: string;
@@ -59,8 +55,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
     };
     const config = useAIConfigStore.getState().activeConfig;
     const project = useProjectStore.getState().currentProject;
-    const commandMessages = toCommandMessages([...previousMessages, userMsg]);
-    const systemPrompt = buildSystemPrompt(project);
+    const conversation = [...previousMessages, userMsg];
+    const commandMessages = buildChatMessages(conversation);
+    const systemPrompt = buildSystemPrompt({ project, history: conversation });
     let streamHadError = false;
     let unlistenChunk: (() => void) | undefined;
     let unlistenDone: (() => void) | undefined;
@@ -156,44 +153,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
     });
   }
 }));
-
-function toCommandMessages(messages: Message[]): ChatCommandMessage[] {
-  return messages.flatMap((message) => {
-    if ((message.role === "user" || message.role === "assistant") && message.content.trim()) {
-      return [{ role: message.role, content: message.content }];
-    }
-
-    return [];
-  });
-}
-
-function buildSystemPrompt(project: Project | null | undefined): string {
-  const lines = [
-    "你是 DevChat 的代码协作助手。基于用户提供的真实项目上下文回答；只有在输出可审查 diff 时，才声称已经准备了代码变更。"
-  ];
-
-  if (!project) {
-    lines.push("当前未选择项目。");
-    return lines.join("\n");
-  }
-
-  lines.push(`当前仓库：${project.repoFullName}`);
-  lines.push(`当前分支：${project.branch}`);
-
-  if (project.snapshot) {
-    const dependencies = project.snapshot.techStack.dependencies.slice(0, 12);
-    const keyFiles = project.snapshot.keyFiles.slice(0, 12).map((file) => `${file.path}: ${file.summary}`);
-    lines.push(`技术栈：${project.snapshot.techStack.language} / ${project.snapshot.techStack.framework}`);
-    if (dependencies.length > 0) {
-      lines.push(`依赖：${dependencies.join(", ")}`);
-    }
-    if (keyFiles.length > 0) {
-      lines.push(`关键文件：\n${keyFiles.join("\n")}`);
-    }
-  }
-
-  return lines.join("\n");
-}
 
 function removeEmptyAssistantMessage(messages: Message[], assistantId: string): Message[] {
   return messages.filter((message) => message.id !== assistantId || message.content.trim().length > 0);
