@@ -4,6 +4,8 @@ import { BranchSelector } from "../../components/BranchSelector";
 import { useChatStore } from "../../stores/chatStore";
 import { invokeCommand } from "../../lib/tauri";
 import { GITHUB_TOKEN_SECRET_REF, useProjectStore } from "../../stores/projectStore";
+import { buildFileChangesFromDiffs } from "../../lib/patchApply";
+import type { RepositoryFileContent } from "@devchat/types";
 
 export function CommitPage() {
   const diffs = useChatStore((state) => state.pendingDiffs);
@@ -19,25 +21,40 @@ export function CommitPage() {
     }
 
     setStatus("正在提交...");
-    const branchIsFresh = await refreshCurrentBranch();
-    if (!branchIsFresh) {
-      setStatus("远程分支已变化，请刷新项目上下文后再提交");
-      return;
-    }
+    try {
+      const branchIsFresh = await refreshCurrentBranch();
+      if (!branchIsFresh) {
+        setStatus("远程分支已变化，请刷新项目上下文后再提交");
+        return;
+      }
 
-    const result = await invokeCommand<{ sha: string }>("github_commit_and_push", {
-      tokenSecretRef: GITHUB_TOKEN_SECRET_REF,
-      owner: currentProject.repoOwner,
-      repo: currentProject.repoName,
-      branch: currentProject.branch,
-      changes: diffs.filter((diff) => diff.selected).map((diff) => ({
-        path: diff.filePath,
-        content: diff.rawDiff,
-        changeType: diff.type
-      })),
-      message
-    });
-    setStatus(`提交成功 ${result.sha}`);
+      const selectedDiffs = diffs.filter((diff) => diff.selected);
+      if (selectedDiffs.length === 0) {
+        setStatus("请选择至少一个文件变更");
+        return;
+      }
+
+      const changes = await buildFileChangesFromDiffs(selectedDiffs, (path) =>
+        invokeCommand<RepositoryFileContent>("github_get_file_content", {
+          tokenSecretRef: GITHUB_TOKEN_SECRET_REF,
+          owner: currentProject.repoOwner,
+          repo: currentProject.repoName,
+          branch: currentProject.branch,
+          path
+        })
+      );
+      const result = await invokeCommand<{ sha: string }>("github_commit_and_push", {
+        tokenSecretRef: GITHUB_TOKEN_SECRET_REF,
+        owner: currentProject.repoOwner,
+        repo: currentProject.repoName,
+        branch: currentProject.branch,
+        changes,
+        message
+      });
+      setStatus(`提交成功 ${result.sha}`);
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "提交失败");
+    }
   }
 
   return (

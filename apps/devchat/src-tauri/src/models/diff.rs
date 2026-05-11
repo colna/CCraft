@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "camelCase")]
 pub struct FileChange {
     pub path: String,
+    pub previous_path: Option<String>,
     pub content: String,
     pub change_type: String,
 }

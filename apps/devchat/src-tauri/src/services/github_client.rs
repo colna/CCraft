@@ -704,6 +704,7 @@ size 84977953\n";
         let client = GitHubClient::new("token");
         let change = FileChange {
             path: "src/App.tsx".into(),
+            previous_path: None,
             content: "export {}".into(),
             change_type: "modify".into(),
         };
