@@ -188,4 +188,52 @@ describe("chatStore", () => {
     expect(state.messages[1]).toMatchObject({ role: "assistant", content: "新回复" });
     expect(state.error).toBeUndefined();
   });
+
+  it("extracts pending diffs from a valid AI changeset", async () => {
+    tauriMock.invokeCommand.mockImplementation(async (_command: string, args: Record<string, unknown>) => {
+      tauriMock.listeners.get("ai-stream-chunk")?.({
+        requestId: args.requestId,
+        text: `DEVCHAT_CHANGESET
+Summary: Update app.
+Impact: Changes App copy.
+Commit Message: feat: update app copy
+
+\`\`\`diff
+--- a/src/App.tsx
++++ b/src/App.tsx
+@@ -1 +1 @@
+-old
++new
+\`\`\``
+      });
+      tauriMock.listeners.get("ai-stream-done")?.({ requestId: args.requestId });
+    });
+
+    await useChatStore.getState().sendMessage("更新 App 文案");
+
+    const state = useChatStore.getState();
+    expect(state.pendingDiffs).toHaveLength(1);
+    expect(state.pendingDiffs[0]).toMatchObject({
+      filePath: "src/App.tsx",
+      additions: 1,
+      deletions: 1
+    });
+    expect(state.error).toBeUndefined();
+  });
+
+  it("reports malformed AI diffs without creating pending changes", async () => {
+    tauriMock.invokeCommand.mockImplementation(async (_command: string, args: Record<string, unknown>) => {
+      tauriMock.listeners.get("ai-stream-chunk")?.({
+        requestId: args.requestId,
+        text: "DEVCHAT_CHANGESET\nSummary: bad\n\n```diff\nnot a diff\n```"
+      });
+      tauriMock.listeners.get("ai-stream-done")?.({ requestId: args.requestId });
+    });
+
+    await useChatStore.getState().sendMessage("生成坏 diff");
+
+    const state = useChatStore.getState();
+    expect(state.pendingDiffs).toEqual([]);
+    expect(state.error).toContain("无法解析");
+  });
 });

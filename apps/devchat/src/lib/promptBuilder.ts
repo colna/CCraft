@@ -26,6 +26,7 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions = {}): strin
   const lines = [
     "你是 DevChat 的代码协作助手。基于真实项目上下文回答；不要编造文件内容、分支状态或执行结果。",
     "输出要求：先给结论和影响范围；需要改代码时给出可审查的 unified diff；无法确认时说明缺少哪些真实上下文。",
+    "代码变更格式：有变更时必须包含 DEVCHAT_CHANGESET、Summary、Impact、Commit Message 和一个 diff 代码块；无变更时写 NO_DIFF: 原因。",
     "安全要求：不要在回复或 diff 中复述 API key、GitHub token、password 或 secret。"
   ];
 

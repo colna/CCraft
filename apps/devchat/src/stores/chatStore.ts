@@ -1,5 +1,6 @@
 import type { FileDiff, Message } from "@devchat/types";
 import { create } from "zustand";
+import { parseAiChangeResponse } from "../lib/diffParser";
 import { buildChatMessages, buildSystemPrompt } from "../lib/promptBuilder";
 import { invokeCommand, listenCommandEvent } from "../lib/tauri";
 import { useAIConfigStore } from "./aiConfigStore";
@@ -186,13 +187,15 @@ async function startAssistantStream(
       systemPrompt
     });
 
-    set((state) => ({
-      isGenerating: false,
-      error: streamHadError || stoppedStreamIds.has(streamId) ? state.error : undefined,
-      lastFailedUserMessageId:
-        streamHadError || stoppedStreamIds.has(streamId) ? state.lastFailedUserMessageId : undefined,
-      messages: removeEmptyAssistantMessage(state.messages, assistantMsg.id)
-    }));
+    set((state) => {
+      const shouldSkipParse = streamHadError || stoppedStreamIds.has(streamId);
+      return {
+        isGenerating: false,
+        lastFailedUserMessageId: shouldSkipParse ? state.lastFailedUserMessageId : undefined,
+        ...parsePendingDiffState(state, assistantMsg.id, shouldSkipParse),
+        messages: removeEmptyAssistantMessage(state.messages, assistantMsg.id)
+      };
+    });
   } catch (error) {
     set((state) => ({
       isGenerating: false,
@@ -217,4 +220,27 @@ async function startAssistantStream(
 
 function removeEmptyAssistantMessage(messages: Message[], assistantId: string): Message[] {
   return messages.filter((message) => message.id !== assistantId || message.content.trim().length > 0);
+}
+
+function parsePendingDiffState(
+  state: ChatState,
+  assistantId: string,
+  skipParse: boolean
+): Pick<ChatState, "pendingDiffs" | "error"> {
+  if (skipParse) {
+    return { pendingDiffs: state.pendingDiffs, error: state.error };
+  }
+
+  const assistantContent = state.messages.find((message) => message.id === assistantId)?.content ?? "";
+  const result = parseAiChangeResponse(assistantContent);
+
+  if (result.status === "parsed") {
+    return { pendingDiffs: result.diffs, error: undefined };
+  }
+
+  if (result.status === "invalid") {
+    return { pendingDiffs: [], error: `无法解析 AI 输出的 diff：${result.error}` };
+  }
+
+  return { pendingDiffs: state.pendingDiffs, error: undefined };
 }

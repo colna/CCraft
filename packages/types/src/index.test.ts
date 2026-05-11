@@ -38,6 +38,22 @@ describe("shared types", () => {
     expect(diff.selected).toBe(true);
   });
 
+  it("models renamed diffs with previous paths", () => {
+    const diff: FileDiff = {
+      filePath: "src/NewName.tsx",
+      previousFilePath: "src/OldName.tsx",
+      type: "renamed",
+      hunks: [],
+      additions: 0,
+      deletions: 0,
+      rawDiff: "",
+      selected: true
+    };
+
+    expect(diff.previousFilePath).toBe("src/OldName.tsx");
+    expect(diff.type).toBe("renamed");
+  });
+
   it("models Claude AI configs without exposing plaintext API keys", () => {
     const config: AiConfig = {
       id: "claude-haiku",

@@ -128,7 +128,8 @@ export interface DiffHunk {
 
 export interface FileDiff {
   filePath: string;
-  type: "added" | "modified" | "deleted";
+  previousFilePath?: string;
+  type: "added" | "modified" | "deleted" | "renamed";
   hunks: DiffHunk[];
   additions: number;
   deletions: number;

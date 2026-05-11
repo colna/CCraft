@@ -61,6 +61,7 @@ describe("promptBuilder", () => {
     expect(prompt).toContain("role=chat state");
     expect(prompt).toContain("最近对话");
     expect(prompt).toContain("unified diff");
+    expect(prompt).toContain("DEVCHAT_CHANGESET");
   });
 
   it("redacts API keys and tokens before adding context to prompts", () => {
