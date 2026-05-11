@@ -41,6 +41,12 @@ export interface Repository {
   updatedAt: string;
 }
 
+export interface Branch {
+  name: string;
+  sha: string;
+  protected: boolean;
+}
+
 export interface KeyFile {
   path: string;
   role: string;
@@ -65,6 +71,7 @@ export interface Project {
   repoName: string;
   repoFullName: string;
   branch: string;
+  branchSha?: string;
   snapshot?: ProjectSnapshot;
   lastAccessed: string;
 }

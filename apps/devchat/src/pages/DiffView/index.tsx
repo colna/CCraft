@@ -1,5 +1,6 @@
 import { Check, ChevronLeft } from "lucide-react";
 import { Link } from "react-router-dom";
+import { BranchSelector } from "../../components/BranchSelector";
 import { useChatStore } from "../../stores/chatStore";
 
 export function DiffViewPage() {
@@ -17,6 +18,8 @@ export function DiffViewPage() {
           <p>修改文件 ({diffs.length})</p>
         </div>
       </header>
+
+      <BranchSelector />
 
       <div className="file-picker">
         {diffs.map((diff) => (

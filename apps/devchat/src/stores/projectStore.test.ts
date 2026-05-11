@@ -1,4 +1,4 @@
-import type { ProjectSnapshot, Repository } from "@devchat/types";
+import type { Branch, ProjectSnapshot, Repository } from "@devchat/types";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { GITHUB_TOKEN_SECRET_REF, useProjectStore } from "./projectStore";
 import { invokeCommand } from "../lib/tauri";
@@ -27,11 +27,18 @@ const snapshot: ProjectSnapshot = {
   generatedAt: "unix:1778457600"
 };
 
+const branch: Branch = {
+  name: "main",
+  sha: "abc123",
+  protected: true
+};
+
 describe("projectStore", () => {
   beforeEach(() => {
     vi.mocked(invokeCommand).mockReset();
     useProjectStore.setState({
       repos: [],
+      branches: [],
       recentProjects: [],
       currentProject: null,
       page: 0,
@@ -97,6 +104,7 @@ describe("projectStore", () => {
       repoName: "ccraft",
       repoFullName: "colna/ccraft",
       branch: "main",
+      branchSha: "abc123",
       snapshot,
       lastAccessed: "2026-05-11T00:00:00Z"
     };
@@ -111,5 +119,57 @@ describe("projectStore", () => {
     });
     expect(reopened.repoName).toBe("ccraft");
     expect(useProjectStore.getState().currentProject?.repoId).toBe("42");
+  });
+
+  it("loads branches and switches the current project branch", async () => {
+    const project = {
+      repoId: "42",
+      repoOwner: "colna",
+      repoName: "ccraft",
+      repoFullName: "colna/ccraft",
+      branch: "main",
+      snapshot,
+      lastAccessed: "2026-05-11T00:00:00Z"
+    };
+    useProjectStore.setState({ currentProject: project });
+    vi.mocked(invokeCommand).mockResolvedValueOnce([branch, { ...branch, name: "feature/mobile", sha: "def456" }]);
+
+    await useProjectStore.getState().loadBranches();
+    useProjectStore.getState().setProjectBranch("feature/mobile");
+
+    expect(invokeCommand).toHaveBeenCalledWith("github_list_branches", {
+      tokenSecretRef: GITHUB_TOKEN_SECRET_REF,
+      owner: "colna",
+      repo: "ccraft"
+    });
+    expect(useProjectStore.getState().currentProject?.branch).toBe("feature/mobile");
+    expect(useProjectStore.getState().currentProject?.branchSha).toBe("def456");
+  });
+
+  it("blocks commit when the remote branch sha changed after loading", async () => {
+    const project = {
+      repoId: "42",
+      repoOwner: "colna",
+      repoName: "ccraft",
+      repoFullName: "colna/ccraft",
+      branch: "main",
+      branchSha: "old-sha",
+      snapshot,
+      lastAccessed: "2026-05-11T00:00:00Z"
+    };
+    useProjectStore.setState({ currentProject: project });
+    vi.mocked(invokeCommand).mockResolvedValueOnce({ ...branch, sha: "new-sha" });
+
+    const isFresh = await useProjectStore.getState().refreshCurrentBranch();
+
+    expect(invokeCommand).toHaveBeenCalledWith("github_get_branch", {
+      tokenSecretRef: GITHUB_TOKEN_SECRET_REF,
+      owner: "colna",
+      repo: "ccraft",
+      branch: "main"
+    });
+    expect(isFresh).toBe(false);
+    expect(useProjectStore.getState().error).toContain("远程分支已更新");
+    expect(useProjectStore.getState().currentProject?.branchSha).toBe("old-sha");
   });
 });

@@ -1,4 +1,4 @@
-use crate::models::{CommitResult, FileChange, FileTree, Repository};
+use crate::models::{Branch, CommitResult, FileChange, FileTree, Repository};
 use crate::services::github_client::GitHubClient;
 use tauri::AppHandle;
 
@@ -27,6 +27,35 @@ pub async fn github_get_tree(
     let token = crate::commands::storage::get_secret_value(&app, &token_secret_ref)?;
     GitHubClient::new(&token)
         .get_tree(&owner, &repo, &branch)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn github_list_branches(
+    app: AppHandle,
+    token_secret_ref: String,
+    owner: String,
+    repo: String,
+) -> Result<Vec<Branch>, String> {
+    let token = crate::commands::storage::get_secret_value(&app, &token_secret_ref)?;
+    GitHubClient::new(&token)
+        .list_branches(&owner, &repo)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn github_get_branch(
+    app: AppHandle,
+    token_secret_ref: String,
+    owner: String,
+    repo: String,
+    branch: String,
+) -> Result<Branch, String> {
+    let token = crate::commands::storage::get_secret_value(&app, &token_secret_ref)?;
+    GitHubClient::new(&token)
+        .get_branch(&owner, &repo, &branch)
         .await
         .map_err(|error| error.to_string())
 }

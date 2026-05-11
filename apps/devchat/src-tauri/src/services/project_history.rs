@@ -29,6 +29,9 @@ fn validate_project(project: &Project) -> anyhow::Result<()> {
     validate_text(&project.repo_name, "repo name", 120)?;
     validate_text(&project.repo_full_name, "repo full name", 240)?;
     validate_text(&project.branch, "branch", 240)?;
+    if let Some(branch_sha) = &project.branch_sha {
+        validate_text(branch_sha, "branch sha", 120)?;
+    }
     validate_text(&project.last_accessed, "last accessed", 80)?;
     Ok(())
 }
@@ -86,6 +89,7 @@ mod tests {
             repo_name: format!("repo-{repo_id}"),
             repo_full_name: format!("colna/repo-{repo_id}"),
             branch: branch.to_owned(),
+            branch_sha: None,
             snapshot: None,
             last_accessed: last_accessed.to_owned(),
         }

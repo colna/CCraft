@@ -1,4 +1,4 @@
-use crate::models::{CommitResult, FileChange, FileTree, Repository};
+use crate::models::{Branch, CommitResult, FileChange, FileTree, Repository};
 use reqwest::header::{ACCEPT, USER_AGENT};
 use serde::Deserialize;
 
@@ -39,7 +39,12 @@ impl GitHubClient {
         Ok(repos.into_iter().map(Repository::from).collect())
     }
 
-    pub async fn get_tree(&self, owner: &str, repo: &str, branch: &str) -> anyhow::Result<FileTree> {
+    pub async fn get_tree(
+        &self,
+        owner: &str,
+        repo: &str,
+        branch: &str,
+    ) -> anyhow::Result<FileTree> {
         let tree = self
             .github_get(&format!(
                 "{}/repos/{}/{}/git/trees/{}",
@@ -68,6 +73,47 @@ impl GitHubClient {
             .collect();
 
         Ok(FileTree { files })
+    }
+
+    pub async fn list_branches(&self, owner: &str, repo: &str) -> anyhow::Result<Vec<Branch>> {
+        let branches = self
+            .github_get(&format!(
+                "{}/repos/{}/{}/branches",
+                self.base_url,
+                encode_path_segment(owner),
+                encode_path_segment(repo)
+            ))
+            .query(&[("per_page", "100")])
+            .send()
+            .await?
+            .error_for_status()?
+            .json::<Vec<GitHubBranch>>()
+            .await?;
+
+        Ok(branches.into_iter().map(Branch::from).collect())
+    }
+
+    pub async fn get_branch(
+        &self,
+        owner: &str,
+        repo: &str,
+        branch: &str,
+    ) -> anyhow::Result<Branch> {
+        let branch = self
+            .github_get(&format!(
+                "{}/repos/{}/{}/branches/{}",
+                self.base_url,
+                encode_path_segment(owner),
+                encode_path_segment(repo),
+                encode_path_segment(branch)
+            ))
+            .send()
+            .await?
+            .error_for_status()?
+            .json::<GitHubBranch>()
+            .await?;
+
+        Ok(Branch::from(branch))
     }
 
     pub async fn commit_and_push(
@@ -124,6 +170,18 @@ struct GitHubRepo {
     updated_at: String,
 }
 
+#[derive(Debug, Deserialize)]
+struct GitHubBranch {
+    name: String,
+    commit: GitHubBranchCommit,
+    protected: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct GitHubBranchCommit {
+    sha: String,
+}
+
 impl From<GitHubRepo> for Repository {
     fn from(repo: GitHubRepo) -> Self {
         Self {
@@ -140,6 +198,16 @@ impl From<GitHubRepo> for Repository {
             stars: repo.stargazers_count,
             default_branch: repo.default_branch,
             updated_at: repo.updated_at,
+        }
+    }
+}
+
+impl From<GitHubBranch> for Branch {
+    fn from(branch: GitHubBranch) -> Self {
+        Self {
+            name: branch.name,
+            sha: branch.commit.sha,
+            protected: branch.protected,
         }
     }
 }
@@ -184,7 +252,9 @@ mod tests {
             assert!(request.contains("sort=updated"));
             assert!(request.contains("page=2"));
             assert!(request.contains("per_page=25"));
-            assert!(request.to_lowercase().contains("authorization: bearer ghp_test"));
+            assert!(request
+                .to_lowercase()
+                .contains("authorization: bearer ghp_test"));
         })
         .await;
 
@@ -208,23 +278,70 @@ mod tests {
             "truncated": false
         }"#;
         let addr = spawn_github_server(body, |request| {
-            assert!(request.starts_with(
-                "GET /repos/colna/ccraft/git/trees/feature%2Fmobile?recursive=1 "
-            ));
-            assert!(request.to_lowercase().contains("authorization: bearer ghp_test"));
+            assert!(request
+                .starts_with("GET /repos/colna/ccraft/git/trees/feature%2Fmobile?recursive=1 "));
+            assert!(request
+                .to_lowercase()
+                .contains("authorization: bearer ghp_test"));
         })
         .await;
 
         let client = GitHubClient::with_base_url("ghp_test", &format!("http://{addr}"));
-        let tree = client.get_tree("colna", "ccraft", "feature/mobile").await.unwrap();
+        let tree = client
+            .get_tree("colna", "ccraft", "feature/mobile")
+            .await
+            .unwrap();
 
         assert_eq!(tree.files, vec!["package.json", "src/main.tsx"]);
     }
 
     #[tokio::test]
+    async fn lists_repository_branches_from_github_api() {
+        let body = r#"[
+            { "name": "main", "commit": { "sha": "abc123" }, "protected": true },
+            { "name": "feature/mobile", "commit": { "sha": "def456" }, "protected": false }
+        ]"#;
+        let addr = spawn_github_server(body, |request| {
+            assert!(request.starts_with("GET /repos/colna/ccraft/branches?per_page=100 "));
+            assert!(request
+                .to_lowercase()
+                .contains("authorization: bearer ghp_test"));
+        })
+        .await;
+
+        let client = GitHubClient::with_base_url("ghp_test", &format!("http://{addr}"));
+        let branches = client.list_branches("colna", "ccraft").await.unwrap();
+
+        assert_eq!(branches[0].name, "main");
+        assert_eq!(branches[0].sha, "abc123");
+        assert!(branches[0].protected);
+        assert_eq!(branches[1].name, "feature/mobile");
+    }
+
+    #[tokio::test]
+    async fn loads_branch_refs_with_encoded_branch_names() {
+        let body =
+            r#"{ "name": "feature/mobile", "commit": { "sha": "def456" }, "protected": false }"#;
+        let addr = spawn_github_server(body, |request| {
+            assert!(request.starts_with("GET /repos/colna/ccraft/branches/feature%2Fmobile "));
+        })
+        .await;
+
+        let client = GitHubClient::with_base_url("ghp_test", &format!("http://{addr}"));
+        let branch = client
+            .get_branch("colna", "ccraft", "feature/mobile")
+            .await
+            .unwrap();
+
+        assert_eq!(branch.sha, "def456");
+    }
+
+    #[tokio::test]
     async fn refuses_empty_commits() {
         let client = GitHubClient::new("token");
-        let result = client.commit_and_push("colna", "my-app", "main", &[], "msg").await;
+        let result = client
+            .commit_and_push("colna", "my-app", "main", &[], "msg")
+            .await;
         assert!(result.is_err());
     }
 

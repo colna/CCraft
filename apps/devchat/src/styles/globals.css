@@ -209,6 +209,12 @@ button {
   gap: 8px;
 }
 
+.field-block > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .search-field {
   grid-template-columns: auto 1fr;
   align-items: center;
@@ -243,6 +249,14 @@ button {
 
 .helper-text {
   font-size: 0.86rem;
+}
+
+.branch-selector-compact {
+  gap: 6px;
+}
+
+.branch-selector-compact select {
+  padding: 10px 12px;
 }
 
 .warn-text {

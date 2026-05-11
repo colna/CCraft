@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { AiConfig, FileDiff, ProjectSnapshot, UserConfig } from "./index";
+import type { AiConfig, Branch, FileDiff, ProjectSnapshot, UserConfig } from "./index";
 
 describe("shared types", () => {
   it("allows project snapshots with key files and module maps", () => {
@@ -68,5 +68,15 @@ describe("shared types", () => {
 
     expect(config.aiConfigs[0]).not.toHaveProperty("apiKey");
     expect(config.githubAuthStatus).toBe("configured");
+  });
+
+  it("models GitHub branches with commit refs", () => {
+    const branch: Branch = {
+      name: "feature/mobile",
+      sha: "abc123",
+      protected: false
+    };
+
+    expect(branch.name).toBe("feature/mobile");
   });
 });

@@ -1,5 +1,6 @@
 import { Rocket } from "lucide-react";
 import { useState } from "react";
+import { BranchSelector } from "../../components/BranchSelector";
 import { useChatStore } from "../../stores/chatStore";
 import { invokeCommand } from "../../lib/tauri";
 import { GITHUB_TOKEN_SECRET_REF, useProjectStore } from "../../stores/projectStore";
@@ -7,6 +8,7 @@ import { GITHUB_TOKEN_SECRET_REF, useProjectStore } from "../../stores/projectSt
 export function CommitPage() {
   const diffs = useChatStore((state) => state.pendingDiffs);
   const currentProject = useProjectStore((state) => state.currentProject);
+  const refreshCurrentBranch = useProjectStore((state) => state.refreshCurrentBranch);
   const [message, setMessage] = useState("feat: add search functionality");
   const [status, setStatus] = useState<string | null>(null);
 
@@ -17,6 +19,12 @@ export function CommitPage() {
     }
 
     setStatus("正在提交...");
+    const branchIsFresh = await refreshCurrentBranch();
+    if (!branchIsFresh) {
+      setStatus("远程分支已变化，请刷新项目上下文后再提交");
+      return;
+    }
+
     const result = await invokeCommand<{ sha: string }>("github_commit_and_push", {
       tokenSecretRef: GITHUB_TOKEN_SECRET_REF,
       owner: currentProject.repoOwner,
@@ -39,13 +47,7 @@ export function CommitPage() {
         <p>选择文件，编辑 Commit Message，然后推送到远程。</p>
       </header>
 
-      <label className="field-block">
-        <span>分支</span>
-        <select defaultValue={currentProject?.branch ?? "main"} aria-label="分支" disabled>
-          <option value={currentProject?.branch ?? "main"}>{currentProject?.branch ?? "main"}</option>
-          <option value="develop">develop</option>
-        </select>
-      </label>
+      <BranchSelector />
 
       <label className="field-block">
         <span>Commit Message</span>

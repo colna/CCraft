@@ -17,6 +17,14 @@ pub struct Repository {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct Branch {
+    pub name: String,
+    pub sha: String,
+    pub protected: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct FileTree {
     pub files: Vec<String>,
 }
@@ -55,6 +63,7 @@ pub struct Project {
     pub repo_name: String,
     pub repo_full_name: String,
     pub branch: String,
+    pub branch_sha: Option<String>,
     pub snapshot: Option<ProjectSnapshot>,
     pub last_accessed: String,
 }

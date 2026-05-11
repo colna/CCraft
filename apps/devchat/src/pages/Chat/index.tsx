@@ -3,6 +3,7 @@ import { useState } from "react";
 import type { FormEvent } from "react";
 import { Link } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
+import { BranchSelector } from "../../components/BranchSelector";
 import { useAI } from "../../hooks/useAI";
 import { useProjectStore } from "../../stores/projectStore";
 
@@ -30,6 +31,7 @@ export function ChatPage() {
           <FileCode2 size={20} />
         </Link>
       </header>
+      <BranchSelector variant="compact" />
 
       <div className="message-list">
         {messages.map((message) => (
