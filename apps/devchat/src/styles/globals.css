@@ -325,6 +325,30 @@ button {
   grid-template-rows: auto 1fr auto;
 }
 
+.chat-context-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.chat-context-strip > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  max-width: 100%;
+  border-radius: 8px;
+  padding: 6px 9px;
+  background: rgba(255, 255, 255, 0.72);
+  color: rgba(29, 29, 31, 0.72);
+  font-size: 13px;
+}
+
+.chat-context-strip strong {
+  color: #1d1d1f;
+}
+
 .message-list {
   display: grid;
   align-content: start;
@@ -356,6 +380,21 @@ button {
 
 .message-user span {
   color: rgba(255, 255, 255, 0.72);
+}
+
+.chat-error {
+  display: grid;
+  gap: 8px;
+}
+
+.chat-error p {
+  margin: 0;
+}
+
+.error-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .chat-input {

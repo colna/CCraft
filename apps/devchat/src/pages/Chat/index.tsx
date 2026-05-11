@@ -1,18 +1,21 @@
-import { FileCode2, RefreshCw, Send, Square } from "lucide-react";
+import { FileCode2, RefreshCw, Send, Square, X } from "lucide-react";
 import { useState } from "react";
 import type { FormEvent } from "react";
 import { Link } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
 import { BranchSelector } from "../../components/BranchSelector";
+import { StatusPill } from "../../components/StatusPill";
 import { useAI } from "../../hooks/useAI";
+import { useAIConfigStore } from "../../stores/aiConfigStore";
 import { useProjectStore } from "../../stores/projectStore";
 
 export function ChatPage() {
-  const { messages, isGenerating, pendingDiffs, error, sendMessage, stopGeneration } = useAI();
+  const { messages, isGenerating, pendingDiffs, error, canRetry, sendMessage, retryLastMessage, clearError, stopGeneration } = useAI();
   const currentProject = useProjectStore((state) => state.currentProject);
   const snapshotProgress = useProjectStore((state) => state.snapshotProgress);
   const isProjectLoading = useProjectStore((state) => state.isLoading);
   const refreshSnapshot = useProjectStore((state) => state.refreshSnapshot);
+  const activeConfig = useAIConfigStore((state) => state.activeConfig);
   const [value, setValue] = useState("");
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -45,6 +48,23 @@ export function ChatPage() {
           </Link>
         </div>
       </header>
+      <div className="chat-context-strip" aria-label="当前对话上下文">
+        <span>
+          <strong>项目</strong>
+          {currentProject?.repoFullName ?? "未选择"}
+        </span>
+        <span>
+          <strong>分支</strong>
+          {currentProject?.branch ?? "-"}
+        </span>
+        <span>
+          <strong>模型</strong>
+          {activeConfig.name} · {activeConfig.model}
+        </span>
+        <StatusPill tone={currentProject?.snapshot ? "ok" : "info"}>
+          {currentProject?.snapshot ? "快照已就绪" : "等待快照"}
+        </StatusPill>
+      </div>
       <BranchSelector variant="compact" />
       {snapshotProgress ? (
         <p className="helper-text">{snapshotProgress.message} · {snapshotProgress.percent}%</p>
@@ -65,7 +85,19 @@ export function ChatPage() {
             <span>{pendingDiffs.length} 个文件 · +{pendingDiffs.reduce((sum, diff) => sum + diff.additions, 0)}</span>
           </Link>
         )}
-        {error ? <p className="helper-text warn-text">{error}</p> : null}
+        {error ? (
+          <div className="chat-error" role="alert">
+            <p className="helper-text warn-text">{error}</p>
+            <div className="error-actions">
+              <button type="button" className="secondary-action" onClick={() => void retryLastMessage()} disabled={!canRetry || isGenerating}>
+                <RefreshCw size={16} /> 重试
+              </button>
+              <button type="button" className="secondary-action" onClick={clearError}>
+                <X size={16} /> 关闭
+              </button>
+            </div>
+          </div>
+        ) : null}
       </div>
 
       <form className="chat-input" onSubmit={handleSubmit}>

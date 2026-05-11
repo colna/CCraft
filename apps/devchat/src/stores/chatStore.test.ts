@@ -25,7 +25,8 @@ describe("chatStore", () => {
       messages: [],
       isGenerating: false,
       pendingDiffs: [],
-      error: undefined
+      error: undefined,
+      lastFailedUserMessageId: undefined
     });
     useAIConfigStore.setState({
       configs: [defaultConfig],
@@ -103,6 +104,43 @@ describe("chatStore", () => {
     expect(state.pendingDiffs).toEqual([]);
     expect(state.isGenerating).toBe(false);
     expect(state.error).toContain("Tauri App");
+    expect(state.lastFailedUserMessageId).toBe(state.messages[0]?.id);
+  });
+
+  it("retries the last failed user message without duplicating it", async () => {
+    let callCount = 0;
+    tauriMock.invokeCommand.mockImplementation(async (_command: string, args: Record<string, unknown>) => {
+      callCount += 1;
+      if (callCount === 1) {
+        throw new Error("network down");
+      }
+
+      tauriMock.listeners.get("ai-stream-chunk")?.({ requestId: args.requestId, text: "重试成功" });
+      tauriMock.listeners.get("ai-stream-done")?.({ requestId: args.requestId });
+    });
+
+    await useChatStore.getState().sendMessage("帮我修复登录错误");
+    await useChatStore.getState().retryLastMessage();
+
+    const state = useChatStore.getState();
+    expect(tauriMock.invokeCommand).toHaveBeenCalledTimes(2);
+    expect(state.messages.map((message) => message.role)).toEqual(["user", "assistant"]);
+    expect(state.messages[0]?.content).toBe("帮我修复登录错误");
+    expect(state.messages[1]?.content).toBe("重试成功");
+    expect(state.error).toBeUndefined();
+    expect(state.lastFailedUserMessageId).toBeUndefined();
+  });
+
+  it("clears retryable errors", async () => {
+    useChatStore.setState({
+      error: "network down",
+      lastFailedUserMessageId: "user-1"
+    });
+
+    useChatStore.getState().clearError();
+
+    expect(useChatStore.getState().error).toBeUndefined();
+    expect(useChatStore.getState().lastFailedUserMessageId).toBeUndefined();
   });
 
   it("removes an empty assistant message when the stream emits an error", async () => {
