@@ -22,7 +22,11 @@ fn main() {
             devchat_lib::commands::storage::delete_ai_config,
             devchat_lib::commands::storage::update_user_preferences,
             devchat_lib::commands::storage::load_recent_projects,
-            devchat_lib::commands::storage::save_recent_project
+            devchat_lib::commands::storage::save_recent_project,
+            devchat_lib::commands::storage::load_chat_sessions,
+            devchat_lib::commands::storage::save_chat_session,
+            devchat_lib::commands::storage::delete_chat_session,
+            devchat_lib::commands::storage::mark_chat_session_committed
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

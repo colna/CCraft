@@ -431,6 +431,18 @@ button {
   background: #1d1d1f;
 }
 
+.danger-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border: 0;
+  border-radius: 10px;
+  background: #ffe6e6;
+  color: #b42318;
+}
+
 .icon-link {
   width: 42px;
   height: 42px;
@@ -530,6 +542,52 @@ button {
 
 .primary-action {
   width: 100%;
+}
+
+.history-list {
+  display: grid;
+  margin-top: 12px;
+  border-top: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+.history-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 10px 0;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+.history-row-main {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+
+.history-row-main span {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.history-row-main strong,
+.history-row-main small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.history-row-main small {
+  color: rgba(29, 29, 31, 0.58);
 }
 
 .status-text {

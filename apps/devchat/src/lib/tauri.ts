@@ -24,6 +24,10 @@ export async function invokeCommand<T>(command: string, args: CommandArgs = {}):
     case "update_user_preferences":
     case "load_recent_projects":
     case "save_recent_project":
+    case "load_chat_sessions":
+    case "save_chat_session":
+    case "delete_chat_session":
+    case "mark_chat_session_committed":
     case "github_list_repos":
     case "github_list_branches":
     case "github_get_branch":

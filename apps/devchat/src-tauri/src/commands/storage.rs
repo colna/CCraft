@@ -1,11 +1,15 @@
 use tauri::AppHandle;
 use tauri_plugin_store::StoreExt;
 
-use crate::models::{AiConfig, Project, UserConfig, UserPreferences};
+use crate::models::{AiConfig, ChatSession, Project, UserConfig, UserPreferences};
 use crate::services::project_history::{
     empty_project_history, migrate_project_history_value, upsert_recent_project,
 };
 use crate::services::secret_store::{default_secret_store, SecretStore};
+use crate::services::session_history::{
+    delete_session, empty_session_history, mark_session_committed, migrate_session_history_value,
+    upsert_session,
+};
 use crate::services::user_config::{
     activate_ai_config, default_user_config, delete_ai_config as delete_user_ai_config,
     normalize_user_config, update_preferences as update_user_config_preferences, upsert_ai_config,
@@ -13,8 +17,10 @@ use crate::services::user_config::{
 };
 
 const SETTINGS_STORE_FILE: &str = "settings.json";
+const SESSIONS_STORE_FILE: &str = "sessions.json";
 const USER_CONFIG_STORE_KEY: &str = "userConfig";
 const RECENT_PROJECTS_STORE_KEY: &str = "recentProjects";
+const SESSION_HISTORY_STORE_KEY: &str = "sessionHistory";
 
 #[tauri::command]
 pub async fn save_secret(_app: AppHandle, key: String, value: String) -> Result<(), String> {
@@ -98,6 +104,45 @@ pub async fn save_recent_project(app: AppHandle, project: Project) -> Result<Vec
     Ok(projects)
 }
 
+#[tauri::command]
+pub async fn load_chat_sessions(app: AppHandle) -> Result<Vec<ChatSession>, String> {
+    load_session_history_value(&app).map(|history| history.sessions)
+}
+
+#[tauri::command]
+pub async fn save_chat_session(
+    app: AppHandle,
+    session: ChatSession,
+) -> Result<Vec<ChatSession>, String> {
+    let history = load_session_history_value(&app)?;
+    let history = upsert_session(history, session).map_err(|error| error.to_string())?;
+    save_session_history_value(&app, &history)?;
+    Ok(history.sessions)
+}
+
+#[tauri::command]
+pub async fn delete_chat_session(app: AppHandle, id: String) -> Result<Vec<ChatSession>, String> {
+    let history = load_session_history_value(&app)?;
+    let history = delete_session(history, &id).map_err(|error| error.to_string())?;
+    save_session_history_value(&app, &history)?;
+    Ok(history.sessions)
+}
+
+#[tauri::command]
+pub async fn mark_chat_session_committed(
+    app: AppHandle,
+    id: String,
+    commit_sha: String,
+    commit_url: Option<String>,
+    updated_at: String,
+) -> Result<Vec<ChatSession>, String> {
+    let history = load_session_history_value(&app)?;
+    let history = mark_session_committed(history, &id, &commit_sha, commit_url, &updated_at)
+        .map_err(|error| error.to_string())?;
+    save_session_history_value(&app, &history)?;
+    Ok(history.sessions)
+}
+
 pub fn get_secret_value(app: &AppHandle, key: &str) -> Result<String, String> {
     get_optional_secret_value(app, key)?.ok_or_else(|| "未找到对应密钥，请先保存凭据".to_owned())
 }
@@ -160,6 +205,32 @@ fn save_recent_projects_value(app: &AppHandle, projects: &[Project]) -> Result<(
     history.projects = projects.to_vec();
     let value = serde_json::to_value(history).map_err(|error| error.to_string())?;
     store.set(RECENT_PROJECTS_STORE_KEY.to_owned(), value);
+    store.save().map_err(|error| error.to_string())
+}
+
+fn load_session_history_value(
+    app: &AppHandle,
+) -> Result<crate::services::session_history::SessionHistory, String> {
+    let store = app
+        .store(SESSIONS_STORE_FILE)
+        .map_err(|error| error.to_string())?;
+    match store.get(SESSION_HISTORY_STORE_KEY) {
+        Some(value) => {
+            migrate_session_history_value(value.clone()).map_err(|error| error.to_string())
+        }
+        None => Ok(empty_session_history()),
+    }
+}
+
+fn save_session_history_value(
+    app: &AppHandle,
+    history: &crate::services::session_history::SessionHistory,
+) -> Result<(), String> {
+    let store = app
+        .store(SESSIONS_STORE_FILE)
+        .map_err(|error| error.to_string())?;
+    let value = serde_json::to_value(history).map_err(|error| error.to_string())?;
+    store.set(SESSION_HISTORY_STORE_KEY.to_owned(), value);
     store.save().map_err(|error| error.to_string())
 }
 

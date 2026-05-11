@@ -6,6 +6,7 @@ const navItems = [
   { href: "/", label: "首页", icon: Home },
   { href: "/projects", label: "项目", icon: FolderGit2 },
   { href: "/diff", label: "变更", icon: Code2 },
+  { href: "/history", label: "历史", icon: History },
   { href: "/settings", label: "设置", icon: Settings }
 ] as const;
 
@@ -23,10 +24,6 @@ export function AppShell({ children }: { children: ReactNode }) {
             </NavLink>
           );
         })}
-        <NavLink to="/" className="nav-item nav-item-muted">
-          <History size={18} aria-hidden="true" />
-          <span>历史</span>
-        </NavLink>
       </nav>
     </div>
   );

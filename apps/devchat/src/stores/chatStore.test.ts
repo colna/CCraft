@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { Project, Session } from "@devchat/types";
 import { defaultConfig, useAIConfigStore } from "./aiConfigStore";
 import { useChatStore } from "./chatStore";
+import { useProjectStore } from "./projectStore";
 
 const tauriMock = vi.hoisted(() => ({
   invokeCommand: vi.fn(),
@@ -25,8 +27,22 @@ describe("chatStore", () => {
       messages: [],
       isGenerating: false,
       pendingDiffs: [],
+      sessions: [],
+      currentSessionId: undefined,
+      currentSessionStatus: undefined,
       error: undefined,
       lastFailedUserMessageId: undefined
+    });
+    useProjectStore.setState({
+      currentProject: null,
+      recentProjects: [],
+      repos: [],
+      branches: [],
+      snapshotProgress: undefined,
+      page: 0,
+      hasMore: true,
+      isLoading: false,
+      error: undefined
     });
     useAIConfigStore.setState({
       configs: [defaultConfig],
@@ -236,4 +252,131 @@ Commit Message: feat: update app copy
     expect(state.pendingDiffs).toEqual([]);
     expect(state.error).toContain("无法解析");
   });
+
+  it("persists active sessions for the selected project", async () => {
+    useProjectStore.setState({ currentProject: project() });
+    tauriMock.invokeCommand.mockImplementation(async (command: string, args: Record<string, unknown>) => {
+      if (command === "chat_stream") {
+        tauriMock.listeners.get("ai-stream-chunk")?.({ requestId: args.requestId, text: "完成" });
+        tauriMock.listeners.get("ai-stream-done")?.({ requestId: args.requestId });
+        return undefined;
+      }
+      if (command === "save_chat_session") {
+        const session = args.session as Session;
+        expect(session.projectId).toBe("colna/ccraft#main");
+        expect(session.repoFullName).toBe("colna/ccraft");
+        expect(session.status).toBe("active");
+        expect(session.messages.map((message) => message.role)).toEqual(["user", "assistant"]);
+        return [session];
+      }
+      throw new Error(`unexpected command ${command}`);
+    });
+
+    await useChatStore.getState().sendMessage("修复登录错误");
+
+    const state = useChatStore.getState();
+    expect(state.currentSessionId).toEqual(expect.any(String));
+    expect(state.sessions).toHaveLength(1);
+    expect(state.sessions[0]?.title).toBe("修复登录错误");
+  });
+
+  it("opens and deletes persisted sessions", async () => {
+    const storedSession = session();
+    useChatStore.setState({ sessions: [storedSession] });
+
+    useChatStore.getState().openSession(storedSession.id);
+
+    expect(useChatStore.getState().messages).toEqual(storedSession.messages);
+    expect(useChatStore.getState().pendingDiffs).toEqual(storedSession.pendingChanges);
+
+    tauriMock.invokeCommand.mockResolvedValue([]);
+    await useChatStore.getState().deleteSession(storedSession.id);
+
+    const state = useChatStore.getState();
+    expect(tauriMock.invokeCommand).toHaveBeenCalledWith("delete_chat_session", { id: storedSession.id });
+    expect(state.sessions).toEqual([]);
+    expect(state.messages).toEqual([]);
+    expect(state.pendingDiffs).toEqual([]);
+  });
+
+  it("marks the current session committed and clears pending diffs", async () => {
+    const storedSession = session();
+    useChatStore.setState({
+      sessions: [storedSession],
+      currentSessionId: storedSession.id,
+      currentSessionStatus: "active",
+      messages: storedSession.messages,
+      pendingDiffs: storedSession.pendingChanges
+    });
+    const committed = { ...storedSession, status: "committed" as const, pendingChanges: [], commitSha: "abc123" };
+    tauriMock.invokeCommand.mockResolvedValue([committed]);
+
+    await useChatStore.getState().markCurrentSessionCommitted("abc123", "https://github.com/colna/ccraft/commit/abc123");
+
+    const state = useChatStore.getState();
+    expect(tauriMock.invokeCommand).toHaveBeenCalledWith("mark_chat_session_committed", {
+      id: storedSession.id,
+      commitSha: "abc123",
+      commitUrl: "https://github.com/colna/ccraft/commit/abc123",
+      updatedAt: expect.any(String)
+    });
+    expect(state.currentSessionStatus).toBe("committed");
+    expect(state.pendingDiffs).toEqual([]);
+    expect(state.sessions[0]?.commitSha).toBe("abc123");
+  });
+
+  it("keeps committed sessions read-only", async () => {
+    const committed = { ...session(), status: "committed" as const, pendingChanges: [], commitSha: "abc123" };
+    useChatStore.setState({
+      sessions: [committed],
+      currentSessionId: committed.id,
+      currentSessionStatus: "committed",
+      messages: committed.messages
+    });
+
+    await useChatStore.getState().sendMessage("继续修改");
+
+    expect(tauriMock.invokeCommand).not.toHaveBeenCalled();
+    expect(useChatStore.getState().error).toContain("只读");
+  });
 });
+
+function project(): Project {
+  return {
+    repoId: "repo-1",
+    repoOwner: "colna",
+    repoName: "ccraft",
+    repoFullName: "colna/ccraft",
+    branch: "main",
+    branchSha: "head-sha",
+    lastAccessed: "2026-05-11T00:00:00.000Z"
+  };
+}
+
+function session(): Session {
+  return {
+    id: "session-1",
+    projectId: "colna/ccraft#main",
+    repoFullName: "colna/ccraft",
+    branch: "main",
+    title: "修复登录错误",
+    messages: [{
+      id: "message-1",
+      role: "user",
+      content: "修复登录错误",
+      createdAt: "2026-05-11T00:00:00.000Z"
+    }],
+    pendingChanges: [{
+      filePath: "src/App.tsx",
+      type: "modified",
+      hunks: [],
+      additions: 1,
+      deletions: 0,
+      rawDiff: "--- a/src/App.tsx\n+++ b/src/App.tsx",
+      selected: true
+    }],
+    status: "active",
+    createdAt: "2026-05-11T00:00:00.000Z",
+    updatedAt: "2026-05-11T00:00:00.000Z"
+  };
+}

@@ -1,4 +1,4 @@
-import type { FileDiff, Message } from "@devchat/types";
+import type { FileDiff, Message, Project, Session } from "@devchat/types";
 import { create } from "zustand";
 import { parseAiChangeResponse } from "../lib/diffParser";
 import { buildChatMessages, buildSystemPrompt } from "../lib/promptBuilder";
@@ -27,8 +27,16 @@ interface ChatState {
   messages: Message[];
   isGenerating: boolean;
   pendingDiffs: FileDiff[];
+  sessions: Session[];
+  currentSessionId: string | undefined;
+  currentSessionStatus: Session["status"] | undefined;
   error: string | undefined;
   lastFailedUserMessageId: string | undefined;
+  loadSessions: () => Promise<void>;
+  openSession: (sessionId: string) => void;
+  deleteSession: (sessionId: string) => Promise<void>;
+  startNewSession: () => void;
+  markCurrentSessionCommitted: (commitSha: string, commitUrl?: string) => Promise<void>;
   sendMessage: (content: string) => Promise<void>;
   retryLastMessage: () => Promise<void>;
   clearError: () => void;
@@ -40,20 +48,107 @@ export const useChatStore = create<ChatState>((set, get) => ({
   messages: [],
   isGenerating: false,
   pendingDiffs: [],
+  sessions: [],
+  currentSessionId: undefined,
+  currentSessionStatus: undefined,
   error: undefined,
   lastFailedUserMessageId: undefined,
+  loadSessions: async () => {
+    try {
+      const sessions = await invokeCommand<Session[]>("load_chat_sessions");
+      set({ sessions, error: undefined });
+    } catch (error) {
+      set({ error: error instanceof Error ? error.message : "历史会话加载失败" });
+    }
+  },
+  openSession: (sessionId) => {
+    const session = get().sessions.find((session) => session.id === sessionId);
+    if (!session) return;
+
+    set({
+      currentSessionId: session.id,
+      currentSessionStatus: session.status,
+      messages: session.messages,
+      pendingDiffs: session.status === "committed" ? [] : session.pendingChanges,
+      error: undefined,
+      lastFailedUserMessageId: undefined,
+      isGenerating: false
+    });
+  },
+  deleteSession: async (sessionId) => {
+    try {
+      const sessions = await invokeCommand<Session[]>("delete_chat_session", { id: sessionId });
+      const isCurrentSession = get().currentSessionId === sessionId;
+      set({
+        sessions,
+        ...(isCurrentSession
+          ? {
+              currentSessionId: undefined,
+              currentSessionStatus: undefined,
+              messages: [],
+              pendingDiffs: [],
+              lastFailedUserMessageId: undefined
+            }
+          : {}),
+        error: undefined
+      });
+    } catch (error) {
+      set({ error: error instanceof Error ? error.message : "历史会话删除失败" });
+      throw error;
+    }
+  },
+  startNewSession: () => {
+    set({
+      messages: [],
+      pendingDiffs: [],
+      currentSessionId: undefined,
+      currentSessionStatus: undefined,
+      error: undefined,
+      lastFailedUserMessageId: undefined,
+      isGenerating: false
+    });
+  },
+  markCurrentSessionCommitted: async (commitSha, commitUrl) => {
+    const sessionId = get().currentSessionId;
+    if (!sessionId) return;
+
+    try {
+      const sessions = await invokeCommand<Session[]>("mark_chat_session_committed", {
+        id: sessionId,
+        commitSha,
+        commitUrl,
+        updatedAt: new Date().toISOString()
+      });
+      set({
+        sessions,
+        pendingDiffs: [],
+        currentSessionStatus: "committed",
+        error: undefined,
+        lastFailedUserMessageId: undefined
+      });
+    } catch (error) {
+      set({ error: error instanceof Error ? error.message : "会话提交状态保存失败" });
+      throw error;
+    }
+  },
   sendMessage: async (content) => {
     const trimmedContent = content.trim();
     if (!trimmedContent || get().isGenerating) {
+      return;
+    }
+    if (get().currentSessionStatus === "committed") {
+      set({ error: "已提交会话为只读，请开始新会话后继续对话" });
       return;
     }
 
     const previousMessages = get().messages;
     const now = new Date().toISOString();
     const streamId = crypto.randomUUID();
+    const sessionId = get().currentSessionId ?? crypto.randomUUID();
     const userMsg: Message = { id: crypto.randomUUID(), role: "user", content: trimmedContent, createdAt: now };
     await startAssistantStream(set, get, {
       streamId,
+      sessionId,
       userMessageId: userMsg.id,
       conversation: [...previousMessages, userMsg],
       nextMessages: [...previousMessages, userMsg],
@@ -77,6 +172,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     await startAssistantStream(set, get, {
       streamId: crypto.randomUUID(),
+      sessionId: get().currentSessionId ?? crypto.randomUUID(),
       userMessageId: failedUserMessage.id,
       conversation: previousMessages,
       nextMessages: previousMessages,
@@ -98,11 +194,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
         diff.filePath === filePath ? { ...diff, selected: !diff.selected } : diff
       )
     });
+    void persistCurrentSession(set, get);
   }
 }));
 
 type StartAssistantStreamOptions = {
   streamId: string;
+  sessionId: string;
   userMessageId: string;
   conversation: Message[];
   nextMessages: Message[];
@@ -118,7 +216,7 @@ async function startAssistantStream(
   get: () => ChatState,
   options: StartAssistantStreamOptions
 ) {
-  const { streamId, userMessageId, conversation, nextMessages, createdAt } = options;
+  const { streamId, sessionId, userMessageId, conversation, nextMessages, createdAt } = options;
   const assistantMsg: Message = {
     id: crypto.randomUUID(),
     role: "assistant",
@@ -136,6 +234,8 @@ async function startAssistantStream(
   activeStreamId = streamId;
 
   set({
+    currentSessionId: sessionId,
+    currentSessionStatus: "active",
     messages: [...nextMessages, assistantMsg],
     error: undefined,
     lastFailedUserMessageId: undefined,
@@ -196,6 +296,7 @@ async function startAssistantStream(
         messages: removeEmptyAssistantMessage(state.messages, assistantMsg.id)
       };
     });
+    await persistCurrentSession(set, get);
   } catch (error) {
     set((state) => ({
       isGenerating: false,
@@ -207,6 +308,7 @@ async function startAssistantStream(
       lastFailedUserMessageId: stoppedStreamIds.has(streamId) ? state.lastFailedUserMessageId : userMessageId,
       messages: removeEmptyAssistantMessage(state.messages, assistantMsg.id)
     }));
+    await persistCurrentSession(set, get);
   } finally {
     unlistenChunk?.();
     unlistenDone?.();
@@ -216,6 +318,53 @@ async function startAssistantStream(
       activeStreamId = undefined;
     }
   }
+}
+
+async function persistCurrentSession(
+  set: (
+    partial:
+      | Partial<ChatState>
+      | ((state: ChatState) => Partial<ChatState>)
+  ) => void,
+  get: () => ChatState
+) {
+  const state = get();
+  const project = useProjectStore.getState().currentProject;
+  const session = buildSessionFromState(state, project);
+  if (!session) return;
+
+  try {
+    const sessions = await invokeCommand<Session[]>("save_chat_session", { session });
+    set({ sessions });
+  } catch (error) {
+    set({ error: error instanceof Error ? error.message : "历史会话保存失败" });
+  }
+}
+
+function buildSessionFromState(state: ChatState, project: Project | null): Session | null {
+  if (!project || state.messages.length === 0 || !state.currentSessionId) {
+    return null;
+  }
+
+  const existingSession = state.sessions.find((session) => session.id === state.currentSessionId);
+  const firstMessage = state.messages[0];
+  const now = new Date().toISOString();
+  const title = state.messages.find((message) => message.role === "user")?.content ?? project.repoFullName;
+
+  return {
+    id: state.currentSessionId,
+    projectId: `${project.repoFullName}#${project.branch}`,
+    repoFullName: project.repoFullName,
+    branch: project.branch,
+    title: title.slice(0, 80),
+    messages: state.messages,
+    pendingChanges: state.currentSessionStatus === "committed" ? [] : state.pendingDiffs,
+    status: state.currentSessionStatus ?? "active",
+    ...(existingSession?.commitSha ? { commitSha: existingSession.commitSha } : {}),
+    ...(existingSession?.commitUrl ? { commitUrl: existingSession.commitUrl } : {}),
+    createdAt: existingSession?.createdAt ?? firstMessage?.createdAt ?? now,
+    updatedAt: now
+  };
 }
 
 function removeEmptyAssistantMessage(messages: Message[], assistantId: string): Message[] {

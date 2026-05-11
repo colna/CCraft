@@ -34,6 +34,9 @@ describe("ChatPage", () => {
       messages: [],
       isGenerating: false,
       pendingDiffs: [],
+      sessions: [],
+      currentSessionId: undefined,
+      currentSessionStatus: undefined,
       error: undefined,
       lastFailedUserMessageId: undefined
     });
@@ -81,5 +84,26 @@ describe("ChatPage", () => {
     expect(screen.getAllByText("feature/real-ai").length).toBeGreaterThan(0);
     expect(screen.getByText("OpenAI-compatible · gpt-4.1-mini")).toBeTruthy();
     expect(screen.getByText("快照已就绪")).toBeTruthy();
+  });
+
+  it("shows committed sessions as read-only", () => {
+    useChatStore.setState({
+      currentSessionStatus: "committed",
+      messages: [{
+        id: "message-1",
+        role: "user",
+        content: "已完成的修改",
+        createdAt: "2026-05-11T00:00:00.000Z"
+      }]
+    });
+
+    render(
+      <MemoryRouter>
+        <ChatPage />
+      </MemoryRouter>
+    );
+
+    expect(screen.getByText("已提交只读")).toBeTruthy();
+    expect((screen.getByLabelText("输入你的需求") as HTMLInputElement).disabled).toBe(true);
   });
 });

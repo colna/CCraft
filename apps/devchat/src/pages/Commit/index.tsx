@@ -9,6 +9,7 @@ import type { RepositoryFileContent } from "@devchat/types";
 
 export function CommitPage() {
   const diffs = useChatStore((state) => state.pendingDiffs);
+  const markCurrentSessionCommitted = useChatStore((state) => state.markCurrentSessionCommitted);
   const currentProject = useProjectStore((state) => state.currentProject);
   const refreshCurrentBranch = useProjectStore((state) => state.refreshCurrentBranch);
   const [message, setMessage] = useState("feat: add search functionality");
@@ -43,7 +44,7 @@ export function CommitPage() {
           path
         })
       );
-      const result = await invokeCommand<{ sha: string }>("github_commit_and_push", {
+      const result = await invokeCommand<{ sha: string; htmlUrl?: string }>("github_commit_and_push", {
         tokenSecretRef: GITHUB_TOKEN_SECRET_REF,
         owner: currentProject.repoOwner,
         repo: currentProject.repoName,
@@ -51,6 +52,7 @@ export function CommitPage() {
         changes,
         message
       });
+      await markCurrentSessionCommitted(result.sha, result.htmlUrl);
       setStatus(`提交成功 ${result.sha}`);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "提交失败");

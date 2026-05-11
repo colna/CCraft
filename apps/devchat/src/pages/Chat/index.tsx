@@ -1,4 +1,4 @@
-import { FileCode2, RefreshCw, Send, Square, X } from "lucide-react";
+import { FileCode2, History, Plus, RefreshCw, Send, Square, X } from "lucide-react";
 import { useState } from "react";
 import type { FormEvent } from "react";
 import { Link } from "react-router-dom";
@@ -10,7 +10,19 @@ import { useAIConfigStore } from "../../stores/aiConfigStore";
 import { useProjectStore } from "../../stores/projectStore";
 
 export function ChatPage() {
-  const { messages, isGenerating, pendingDiffs, error, canRetry, sendMessage, retryLastMessage, clearError, stopGeneration } = useAI();
+  const {
+    messages,
+    isGenerating,
+    pendingDiffs,
+    error,
+    currentSessionStatus,
+    canRetry,
+    startNewSession,
+    sendMessage,
+    retryLastMessage,
+    clearError,
+    stopGeneration
+  } = useAI();
   const currentProject = useProjectStore((state) => state.currentProject);
   const snapshotProgress = useProjectStore((state) => state.snapshotProgress);
   const isProjectLoading = useProjectStore((state) => state.isLoading);
@@ -20,6 +32,7 @@ export function ChatPage() {
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (currentSessionStatus === "committed") return;
     const content = value.trim();
     if (!content) return;
     setValue("");
@@ -34,6 +47,17 @@ export function ChatPage() {
           <p>{currentProject?.snapshot?.techStack.framework ?? "选择项目后加载真实快照"}</p>
         </div>
         <div className="header-actions">
+          <button
+            type="button"
+            className="icon-link"
+            aria-label="开始新会话"
+            onClick={startNewSession}
+          >
+            <Plus size={20} />
+          </button>
+          <Link to="/history" className="icon-link" aria-label="查看历史会话">
+            <History size={20} />
+          </Link>
           <button
             type="button"
             className="icon-link"
@@ -64,6 +88,9 @@ export function ChatPage() {
         <StatusPill tone={currentProject?.snapshot ? "ok" : "info"}>
           {currentProject?.snapshot ? "快照已就绪" : "等待快照"}
         </StatusPill>
+        {currentSessionStatus === "committed" ? (
+          <StatusPill tone="info">已提交只读</StatusPill>
+        ) : null}
       </div>
       <BranchSelector variant="compact" />
       {snapshotProgress ? (
@@ -104,15 +131,16 @@ export function ChatPage() {
         <input
           value={value}
           onChange={(event) => setValue(event.target.value)}
-          placeholder="输入你的需求..."
+          placeholder={currentSessionStatus === "committed" ? "已提交会话不可继续编辑" : "输入你的需求..."}
           aria-label="输入你的需求"
+          disabled={currentSessionStatus === "committed"}
         />
         {isGenerating ? (
           <button type="button" onClick={stopGeneration} aria-label="停止生成">
             <Square size={18} />
           </button>
         ) : (
-          <button type="submit" aria-label="发送">
+          <button type="submit" aria-label="发送" disabled={currentSessionStatus === "committed"}>
             <Send size={18} />
           </button>
         )}
