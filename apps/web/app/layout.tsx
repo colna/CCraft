@@ -5,14 +5,14 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: {
-    default: "DevChat",
-    template: "%s | DevChat"
+    default: "DevChat Studio",
+    template: "%s | DevChat Studio"
   },
-  description: "DevChat 是手机里的 AI 编程工作台，支持对话修改代码、审查 Diff 并提交到 GitHub。",
+  description: "DevChat Studio 打造智能应用、数字产品和 AI 驱动的用户体验。",
   openGraph: {
-    title: "DevChat",
-    description: "手机里的 AI 编程工作台",
-    siteName: "DevChat",
+    title: "DevChat Studio",
+    description: "年轻、快速、设计驱动的 AI 产品工作室。",
+    siteName: "DevChat Studio",
     type: "website"
   }
 };
