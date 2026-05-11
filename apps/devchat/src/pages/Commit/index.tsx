@@ -2,17 +2,31 @@ import { Rocket } from "lucide-react";
 import { useState } from "react";
 import { useChatStore } from "../../stores/chatStore";
 import { invokeCommand } from "../../lib/tauri";
+import { GITHUB_TOKEN_SECRET_REF, useProjectStore } from "../../stores/projectStore";
 
 export function CommitPage() {
   const diffs = useChatStore((state) => state.pendingDiffs);
+  const currentProject = useProjectStore((state) => state.currentProject);
   const [message, setMessage] = useState("feat: add search functionality");
   const [status, setStatus] = useState<string | null>(null);
 
   async function commit() {
+    if (!currentProject) {
+      setStatus("请先选择项目");
+      return;
+    }
+
     setStatus("正在提交...");
     const result = await invokeCommand<{ sha: string }>("github_commit_and_push", {
-      branch: "main",
-      changes: diffs.filter((diff) => diff.selected),
+      tokenSecretRef: GITHUB_TOKEN_SECRET_REF,
+      owner: currentProject.repoOwner,
+      repo: currentProject.repoName,
+      branch: currentProject.branch,
+      changes: diffs.filter((diff) => diff.selected).map((diff) => ({
+        path: diff.filePath,
+        content: diff.rawDiff,
+        changeType: diff.type
+      })),
       message
     });
     setStatus(`提交成功 ${result.sha}`);
@@ -27,8 +41,8 @@ export function CommitPage() {
 
       <label className="field-block">
         <span>分支</span>
-        <select defaultValue="main" aria-label="分支">
-          <option value="main">main</option>
+        <select defaultValue={currentProject?.branch ?? "main"} aria-label="分支" disabled>
+          <option value={currentProject?.branch ?? "main"}>{currentProject?.branch ?? "main"}</option>
           <option value="develop">develop</option>
         </select>
       </label>

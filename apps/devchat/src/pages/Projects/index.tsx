@@ -1,13 +1,22 @@
 import { Search, Star } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useProjectStore } from "../../stores/projectStore";
 
 export function ProjectsPage() {
   const navigate = useNavigate();
   const repos = useProjectStore((state) => state.repos);
+  const isLoading = useProjectStore((state) => state.isLoading);
+  const error = useProjectStore((state) => state.error);
+  const loadRepos = useProjectStore((state) => state.loadRepos);
   const selectProject = useProjectStore((state) => state.selectProject);
   const [query, setQuery] = useState("");
+
+  useEffect(() => {
+    if (repos.length === 0) {
+      void loadRepos();
+    }
+  }, [loadRepos, repos.length]);
 
   const filteredRepos = useMemo(() => {
     const normalized = query.trim().toLowerCase();
@@ -39,14 +48,23 @@ export function ProjectsPage() {
       </div>
 
       <div className="list-stack">
+        {isLoading ? <div className="empty-state">正在加载 GitHub 仓库...</div> : null}
+        {error ? <div className="empty-state warn-text">{error}</div> : null}
+        {!isLoading && !error && filteredRepos.length === 0 ? (
+          <div className="empty-state">{query.trim() ? "没有匹配的仓库" : "保存 GitHub Token 后加载仓库"}</div>
+        ) : null}
         {filteredRepos.map((repo) => (
           <button
             key={repo.id}
             type="button"
             className="repo-card"
             onClick={async () => {
-              const project = await selectProject(repo);
-              navigate(`/chat/${project.repoId}`);
+              try {
+                const project = await selectProject(repo);
+                navigate(`/chat/${project.repoId}`);
+              } catch {
+                // Store error state is rendered above.
+              }
             }}
           >
             <div>

@@ -20,7 +20,9 @@ export function HomePage() {
       <section className="section-block">
         <div className="section-heading">
           <h2>最近项目</h2>
-          <StatusPill tone="ok">快照已缓存</StatusPill>
+          <StatusPill tone={currentProject?.snapshot ? "ok" : "info"}>
+            {currentProject?.snapshot ? "快照已缓存" : "等待选择"}
+          </StatusPill>
         </div>
         {currentProject ? (
           <Link className="project-card" to={`/chat/${currentProject.repoId}`}>

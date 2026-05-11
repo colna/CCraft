@@ -3,6 +3,7 @@ import { useState } from "react";
 import { StatusPill } from "../../components/StatusPill";
 import { invokeCommand } from "../../lib/tauri";
 import { useAIConfigStore } from "../../stores/aiConfigStore";
+import { GITHUB_TOKEN_SECRET_REF } from "../../stores/projectStore";
 
 export function SettingsPage() {
   const activeConfig = useAIConfigStore((state) => state.activeConfig);
@@ -10,6 +11,8 @@ export function SettingsPage() {
   const testConnection = useAIConfigStore((state) => state.testConnection);
   const [apiKey, setApiKey] = useState("");
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [githubToken, setGithubToken] = useState("");
+  const [githubSaveStatus, setGithubSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
 
   const saveApiKey = async () => {
     if (!apiKey.trim()) {
@@ -24,6 +27,22 @@ export function SettingsPage() {
       setSaveStatus("saved");
     } catch {
       setSaveStatus("error");
+    }
+  };
+
+  const saveGithubToken = async () => {
+    if (!githubToken.trim()) {
+      setGithubSaveStatus("error");
+      return;
+    }
+
+    setGithubSaveStatus("saving");
+    try {
+      await invokeCommand("save_secret", { key: GITHUB_TOKEN_SECRET_REF, value: githubToken.trim() });
+      setGithubToken("");
+      setGithubSaveStatus("saved");
+    } catch {
+      setGithubSaveStatus("error");
     }
   };
 
@@ -88,9 +107,32 @@ export function SettingsPage() {
       <section className="settings-card">
         <div className="section-heading">
           <h2><Github size={18} /> GitHub</h2>
-          <StatusPill tone="ok">已绑定</StatusPill>
+          <StatusPill tone={githubSaveStatus === "saved" ? "ok" : githubSaveStatus === "error" ? "warn" : "info"}>
+            {githubSaveStatus === "saving" ? "保存中" : githubSaveStatus === "saved" ? "已保存" : githubSaveStatus === "error" ? "失败" : "待配置"}
+          </StatusPill>
         </div>
-        <p>OAuth token 仅保存在 Rust 安全层，前端只读取授权状态。</p>
+        <p>OAuth Proxy 接入前，先使用 GitHub Token 打通真实仓库与快照链路；token 仅保存到 Rust store。</p>
+        <label className="field-block">
+          <span>GitHub Token</span>
+          <input
+            aria-label="GitHub Token"
+            autoComplete="off"
+            onChange={(event) => {
+              setGithubToken(event.target.value);
+              setGithubSaveStatus("idle");
+            }}
+            placeholder="需要 repo 读取权限"
+            type="password"
+            value={githubToken}
+          />
+        </label>
+        <div className="settings-actions">
+          <button className="secondary-action" type="button" onClick={saveGithubToken}>
+            {githubSaveStatus === "saving" ? "保存中" : "保存 Token"}
+          </button>
+        </div>
+        {githubSaveStatus === "saved" ? <p className="helper-text">GitHub Token 已保存，可到项目页加载真实仓库。</p> : null}
+        {githubSaveStatus === "error" ? <p className="helper-text warn-text">请填写有效 Token，并确认当前运行在 Tauri App 中。</p> : null}
       </section>
     </section>
   );

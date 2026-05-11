@@ -1,38 +1,78 @@
 use crate::models::{CommitResult, FileChange, FileTree, Repository};
+use reqwest::header::{ACCEPT, USER_AGENT};
+use serde::Deserialize;
 
 pub struct GitHubClient {
     token: String,
+    base_url: String,
+    http: reqwest::Client,
 }
 
 impl GitHubClient {
     pub fn new(token: &str) -> Self {
-        Self { token: token.to_owned() }
+        Self::with_base_url(token, "https://api.github.com")
     }
 
-    pub async fn list_repos(&self, _page: u32, _per_page: u32) -> anyhow::Result<Vec<Repository>> {
-        let _ = &self.token;
-        Ok(vec![Repository {
-            id: "repo_1".into(),
-            owner: "colna".into(),
-            name: "my-app".into(),
-            full_name: "colna/my-app".into(),
-            private: true,
-            language: Some("TypeScript".into()),
-            stars: 12,
-            default_branch: "main".into(),
-            updated_at: "2026-05-10T08:00:00.000Z".into(),
-        }])
+    pub fn with_base_url(token: &str, base_url: &str) -> Self {
+        Self {
+            token: token.to_owned(),
+            base_url: base_url.trim_end_matches('/').to_owned(),
+            http: reqwest::Client::new(),
+        }
     }
 
-    pub async fn get_tree(&self, _owner: &str, _repo: &str, _branch: &str) -> anyhow::Result<FileTree> {
-        Ok(FileTree {
-            files: vec!["package.json".into(), "src/App.tsx".into(), "src/UserList.tsx".into()],
-        })
+    pub async fn list_repos(&self, page: u32, per_page: u32) -> anyhow::Result<Vec<Repository>> {
+        let repos = self
+            .github_get(&format!("{}/user/repos", self.base_url))
+            .query(&[
+                ("visibility", "all".to_owned()),
+                ("sort", "updated".to_owned()),
+                ("page", page.max(1).to_string()),
+                ("per_page", per_page.clamp(1, 100).to_string()),
+            ])
+            .send()
+            .await?
+            .error_for_status()?
+            .json::<Vec<GitHubRepo>>()
+            .await?;
+
+        Ok(repos.into_iter().map(Repository::from).collect())
+    }
+
+    pub async fn get_tree(&self, owner: &str, repo: &str, branch: &str) -> anyhow::Result<FileTree> {
+        let tree = self
+            .github_get(&format!(
+                "{}/repos/{}/{}/git/trees/{}",
+                self.base_url,
+                encode_path_segment(owner),
+                encode_path_segment(repo),
+                encode_path_segment(branch)
+            ))
+            .query(&[("recursive", "1")])
+            .send()
+            .await?
+            .error_for_status()?
+            .json::<GitHubTreeResponse>()
+            .await?;
+
+        anyhow::ensure!(
+            !tree.truncated,
+            "GitHub tree response was truncated; refresh with a narrower tree is not implemented yet"
+        );
+
+        let files = tree
+            .tree
+            .into_iter()
+            .filter(|entry| entry.kind == "blob")
+            .map(|entry| entry.path)
+            .collect();
+
+        Ok(FileTree { files })
     }
 
     pub async fn commit_and_push(
         &self,
-        _owner: &str,
+        owner: &str,
         repo: &str,
         _branch: &str,
         changes: &[FileChange],
@@ -41,15 +81,146 @@ impl GitHubClient {
         anyhow::ensure!(!changes.is_empty(), "no changes selected");
         Ok(CommitResult {
             sha: "demo1234".into(),
-            html_url: Some(format!("https://github.com/colna/{repo}/commit/demo1234")),
+            html_url: Some(format!("https://github.com/{owner}/{repo}/commit/demo1234")),
         })
     }
+
+    fn github_get(&self, url: &str) -> reqwest::RequestBuilder {
+        self.http
+            .get(url)
+            .bearer_auth(&self.token)
+            .header(USER_AGENT, "DevChat")
+            .header(ACCEPT, "application/vnd.github+json")
+            .header("X-GitHub-Api-Version", "2022-11-28")
+    }
+}
+
+fn encode_path_segment(value: &str) -> String {
+    value
+        .bytes()
+        .map(|byte| match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
+                (byte as char).to_string()
+            }
+            _ => format!("%{byte:02X}"),
+        })
+        .collect()
+}
+
+#[derive(Debug, Deserialize)]
+struct GitHubOwner {
+    login: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct GitHubRepo {
+    id: serde_json::Value,
+    owner: GitHubOwner,
+    name: String,
+    full_name: String,
+    private: bool,
+    language: Option<String>,
+    stargazers_count: u32,
+    default_branch: String,
+    updated_at: String,
+}
+
+impl From<GitHubRepo> for Repository {
+    fn from(repo: GitHubRepo) -> Self {
+        Self {
+            id: repo
+                .id
+                .as_str()
+                .map(ToOwned::to_owned)
+                .unwrap_or_else(|| repo.id.to_string()),
+            owner: repo.owner.login,
+            name: repo.name,
+            full_name: repo.full_name,
+            private: repo.private,
+            language: repo.language,
+            stars: repo.stargazers_count,
+            default_branch: repo.default_branch,
+            updated_at: repo.updated_at,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct GitHubTreeResponse {
+    tree: Vec<GitHubTreeEntry>,
+    truncated: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct GitHubTreeEntry {
+    path: String,
+    #[serde(rename = "type")]
+    kind: String,
 }
 
 #[cfg(test)]
 mod tests {
     use super::GitHubClient;
     use crate::models::FileChange;
+    use std::net::SocketAddr;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+
+    #[tokio::test]
+    async fn lists_repositories_from_github_api() {
+        let body = r#"[{
+            "id": 42,
+            "owner": { "login": "colna" },
+            "name": "ccraft",
+            "full_name": "colna/ccraft",
+            "private": true,
+            "language": "TypeScript",
+            "stargazers_count": 9,
+            "default_branch": "main",
+            "updated_at": "2026-05-11T00:00:00Z"
+        }]"#;
+        let addr = spawn_github_server(body, |request| {
+            assert!(request.starts_with("GET /user/repos?"));
+            assert!(request.contains("visibility=all"));
+            assert!(request.contains("sort=updated"));
+            assert!(request.contains("page=2"));
+            assert!(request.contains("per_page=25"));
+            assert!(request.to_lowercase().contains("authorization: bearer ghp_test"));
+        })
+        .await;
+
+        let client = GitHubClient::with_base_url("ghp_test", &format!("http://{addr}"));
+        let repos = client.list_repos(2, 25).await.unwrap();
+
+        assert_eq!(repos[0].id, "42");
+        assert_eq!(repos[0].owner, "colna");
+        assert_eq!(repos[0].full_name, "colna/ccraft");
+        assert_eq!(repos[0].stars, 9);
+    }
+
+    #[tokio::test]
+    async fn loads_repository_tree_files_from_github_api() {
+        let body = r#"{
+            "tree": [
+                { "path": "package.json", "type": "blob" },
+                { "path": "src", "type": "tree" },
+                { "path": "src/main.tsx", "type": "blob" }
+            ],
+            "truncated": false
+        }"#;
+        let addr = spawn_github_server(body, |request| {
+            assert!(request.starts_with(
+                "GET /repos/colna/ccraft/git/trees/feature%2Fmobile?recursive=1 "
+            ));
+            assert!(request.to_lowercase().contains("authorization: bearer ghp_test"));
+        })
+        .await;
+
+        let client = GitHubClient::with_base_url("ghp_test", &format!("http://{addr}"));
+        let tree = client.get_tree("colna", "ccraft", "feature/mobile").await.unwrap();
+
+        assert_eq!(tree.files, vec!["package.json", "src/main.tsx"]);
+    }
 
     #[tokio::test]
     async fn refuses_empty_commits() {
@@ -71,5 +242,27 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(result.sha, "demo1234");
+    }
+
+    async fn spawn_github_server<F>(body: &'static str, assert_request: F) -> SocketAddr
+    where
+        F: FnOnce(&str) + Send + 'static,
+    {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut buffer = vec![0; 4096];
+            let bytes = socket.read(&mut buffer).await.unwrap();
+            let request = String::from_utf8_lossy(&buffer[..bytes]);
+            assert_request(&request);
+
+            let response = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            socket.write_all(response.as_bytes()).await.unwrap();
+        });
+        addr
     }
 }

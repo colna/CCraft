@@ -2,7 +2,6 @@ use crate::models::ChatMessage;
 use crate::services::ai_client::AiClient;
 use futures_util::StreamExt;
 use tauri::{AppHandle, Emitter};
-use tauri_plugin_store::StoreExt;
 
 #[tauri::command]
 pub async fn test_ai_connection(
@@ -12,7 +11,7 @@ pub async fn test_ai_connection(
     api_key_secret_ref: String,
     model: String,
 ) -> Result<bool, String> {
-    let api_key = get_secret(&app, &api_key_secret_ref)?;
+    let api_key = crate::commands::storage::get_secret_value(&app, &api_key_secret_ref)?;
     AiClient::new(&provider, &base_url, &api_key, &model)
         .test_connection()
         .await
@@ -28,7 +27,7 @@ pub async fn chat_stream(
     messages: Vec<ChatMessage>,
     system_prompt: String,
 ) -> Result<(), String> {
-    let api_key = get_secret(&app, &api_key_secret_ref)?;
+    let api_key = crate::commands::storage::get_secret_value(&app, &api_key_secret_ref)?;
     let client = AiClient::new("claude", &base_url, &api_key, &model);
     let mut stream = client
         .chat_stream(&messages, &system_prompt)
@@ -47,12 +46,4 @@ pub async fn chat_stream(
     }
 
     app.emit("ai-stream-done", ()).map_err(|error| error.to_string())
-}
-
-fn get_secret(app: &AppHandle, key: &str) -> Result<String, String> {
-    let store = app.store("secrets.json").map_err(|error| error.to_string())?;
-    store
-        .get(key)
-        .and_then(|value| value.as_str().map(ToOwned::to_owned))
-        .ok_or_else(|| "未找到对应密钥，请先保存 API Key".to_owned())
 }

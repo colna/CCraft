@@ -23,8 +23,8 @@ export function ChatPage() {
     <section className="chat-layout">
       <header className="chat-header">
         <div>
-          <h1>{currentProject?.repoName ?? "my-app"} · {currentProject?.branch ?? "main"}</h1>
-          <p>{currentProject?.snapshot?.techStack.framework ?? "React + TypeScript"}</p>
+          <h1>{currentProject ? `${currentProject.repoName} · ${currentProject.branch}` : "未选择项目"}</h1>
+          <p>{currentProject?.snapshot?.techStack.framework ?? "选择项目后加载真实快照"}</p>
         </div>
         <Link to="/diff" className="icon-link" aria-label="查看全部变更">
           <FileCode2 size={20} />

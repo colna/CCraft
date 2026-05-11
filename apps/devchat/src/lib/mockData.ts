@@ -38,7 +38,9 @@ export const demoRepos: Repository[] = [
 
 export const demoProject: Project = {
   repoId: "repo_1",
+  repoOwner: "colna",
   repoName: "my-app",
+  repoFullName: "colna/my-app",
   branch: "main",
   lastAccessed: "2026-05-10T08:30:00.000Z",
   snapshot: {

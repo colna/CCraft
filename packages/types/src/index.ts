@@ -56,7 +56,9 @@ export interface ProjectSnapshot {
 
 export interface Project {
   repoId: string;
+  repoOwner: string;
   repoName: string;
+  repoFullName: string;
   branch: string;
   snapshot?: ProjectSnapshot;
   lastAccessed: string;

@@ -1,6 +1,6 @@
 import type { FileDiff, Message } from "@devchat/types";
 import { create } from "zustand";
-import { demoDiff, demoSession } from "../lib/mockData";
+import { demoDiff } from "../lib/mockData";
 
 interface ChatState {
   messages: Message[];
@@ -12,9 +12,9 @@ interface ChatState {
 }
 
 export const useChatStore = create<ChatState>((set, get) => ({
-  messages: demoSession.messages,
+  messages: [],
   isGenerating: false,
-  pendingDiffs: demoSession.pendingChanges,
+  pendingDiffs: [],
   sendMessage: async (content) => {
     const now = new Date().toISOString();
     const userMsg: Message = { id: crypto.randomUUID(), role: "user", content, createdAt: now };
