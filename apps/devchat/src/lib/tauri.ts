@@ -27,6 +27,7 @@ export async function invokeCommand<T>(command: string, args: CommandArgs = {}):
     case "github_list_repos":
     case "github_list_branches":
     case "github_get_branch":
+    case "github_get_file_content":
     case "generate_snapshot":
     case "github_commit_and_push":
       throw new Error("真实功能需要在 Tauri App 运行时中使用");

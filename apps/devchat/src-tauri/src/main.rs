@@ -10,6 +10,7 @@ fn main() {
             devchat_lib::commands::github::github_get_tree,
             devchat_lib::commands::github::github_list_branches,
             devchat_lib::commands::github::github_get_branch,
+            devchat_lib::commands::github::github_get_file_content,
             devchat_lib::commands::github::github_commit_and_push,
             devchat_lib::commands::snapshot::generate_snapshot,
             devchat_lib::commands::storage::save_secret,

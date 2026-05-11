@@ -612,6 +612,7 @@ name = "devchat"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "base64 0.22.1",
  "futures-util",
  "keyring",
  "reqwest 0.12.28",

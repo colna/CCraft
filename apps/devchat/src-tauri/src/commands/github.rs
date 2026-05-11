@@ -1,4 +1,7 @@
-use crate::models::{Branch, CommitResult, FileChange, FileTree, Repository};
+use crate::models::{
+    Branch, CommitResult, FileChange, FileTree, GitHubApiError, GitHubApiErrorCode, Repository,
+    RepositoryFileContent,
+};
 use crate::services::github_client::GitHubClient;
 use tauri::AppHandle;
 
@@ -58,6 +61,24 @@ pub async fn github_get_branch(
         .get_branch(&owner, &repo, &branch)
         .await
         .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn github_get_file_content(
+    app: AppHandle,
+    token_secret_ref: String,
+    owner: String,
+    repo: String,
+    branch: String,
+    path: String,
+) -> Result<RepositoryFileContent, GitHubApiError> {
+    let token =
+        crate::commands::storage::get_secret_value(&app, &token_secret_ref).map_err(|error| {
+            GitHubApiError::new(GitHubApiErrorCode::Unauthorized, error.to_string(), None)
+        })?;
+    GitHubClient::new(&token)
+        .get_file_content(&owner, &repo, &branch, &path)
+        .await
 }
 
 #[tauri::command]

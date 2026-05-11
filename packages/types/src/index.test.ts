@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { AiConfig, Branch, FileDiff, ProjectSnapshot, UserConfig } from "./index";
+import type { AiConfig, Branch, FileDiff, GitHubApiError, ProjectSnapshot, RepositoryFileContent, UserConfig } from "./index";
 
 describe("shared types", () => {
   it("allows project snapshots with key files and module maps", () => {
@@ -78,5 +78,30 @@ describe("shared types", () => {
     };
 
     expect(branch.name).toBe("feature/mobile");
+  });
+
+  it("models repository file content and structured GitHub errors", () => {
+    const file: RepositoryFileContent = {
+      path: "src/App.tsx",
+      sha: "abc123",
+      size: 128,
+      content: "export function App() {}"
+    };
+    const skipped: RepositoryFileContent = {
+      path: "large.log",
+      sha: "def456",
+      size: 900_000,
+      skippedReason: "too_large"
+    };
+    const error: GitHubApiError = {
+      code: "rate_limited",
+      message: "API rate limit exceeded",
+      status: 403,
+      retryAfterSeconds: 30
+    };
+
+    expect(file.content).toContain("App");
+    expect(skipped.skippedReason).toBe("too_large");
+    expect(error.code).toBe("rate_limited");
   });
 });

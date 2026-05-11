@@ -31,6 +31,72 @@ pub struct FileTree {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct RepositoryFileContent {
+    pub path: String,
+    pub sha: String,
+    pub size: u64,
+    pub content: Option<String>,
+    pub skipped_reason: Option<RepositoryFileSkipReason>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum RepositoryFileSkipReason {
+    TooLarge,
+    Binary,
+    GitLfsPointer,
+    UnsupportedEncoding,
+    Directory,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct GitHubApiError {
+    pub code: GitHubApiErrorCode,
+    pub message: String,
+    pub status: Option<u16>,
+    pub retry_after_seconds: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum GitHubApiErrorCode {
+    InvalidInput,
+    NotFound,
+    RateLimited,
+    Unauthorized,
+    Forbidden,
+    InvalidResponse,
+    Network,
+    Unknown,
+}
+
+impl GitHubApiError {
+    pub fn new(code: GitHubApiErrorCode, message: impl Into<String>, status: Option<u16>) -> Self {
+        Self {
+            code,
+            message: message.into(),
+            status,
+            retry_after_seconds: None,
+        }
+    }
+
+    pub fn with_retry_after(mut self, retry_after_seconds: Option<u64>) -> Self {
+        self.retry_after_seconds = retry_after_seconds;
+        self
+    }
+}
+
+impl std::fmt::Display for GitHubApiError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "{} ({:?})", self.message, self.code)
+    }
+}
+
+impl std::error::Error for GitHubApiError {}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct KeyFile {
     pub path: String,
     pub role: String,

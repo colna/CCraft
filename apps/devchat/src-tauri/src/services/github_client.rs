@@ -1,6 +1,12 @@
-use crate::models::{Branch, CommitResult, FileChange, FileTree, Repository};
-use reqwest::header::{ACCEPT, USER_AGENT};
+use crate::models::{
+    Branch, CommitResult, FileChange, FileTree, GitHubApiError, GitHubApiErrorCode, Repository,
+    RepositoryFileContent, RepositoryFileSkipReason,
+};
+use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
+use reqwest::header::{HeaderMap, ACCEPT, USER_AGENT};
 use serde::Deserialize;
+
+const MAX_TEXT_FILE_BYTES: u64 = 512 * 1024;
 
 pub struct GitHubClient {
     token: String,
@@ -116,6 +122,43 @@ impl GitHubClient {
         Ok(Branch::from(branch))
     }
 
+    pub async fn get_file_content(
+        &self,
+        owner: &str,
+        repo: &str,
+        branch: &str,
+        path: &str,
+    ) -> Result<RepositoryFileContent, GitHubApiError> {
+        let encoded_path = encode_repository_path(path)?;
+        let response = self
+            .github_get(&format!(
+                "{}/repos/{}/{}/contents/{}",
+                self.base_url,
+                encode_path_segment(owner),
+                encode_path_segment(repo),
+                encoded_path
+            ))
+            .query(&[("ref", branch)])
+            .send()
+            .await
+            .map_err(|error| {
+                GitHubApiError::new(GitHubApiErrorCode::Network, error.to_string(), None)
+            })?;
+
+        if !response.status().is_success() {
+            return Err(github_error_from_response(response).await);
+        }
+
+        let content = response
+            .json::<GitHubContentResponse>()
+            .await
+            .map_err(|error| {
+                GitHubApiError::new(GitHubApiErrorCode::InvalidResponse, error.to_string(), None)
+            })?;
+
+        repository_file_from_content_response(content)
+    }
+
     pub async fn commit_and_push(
         &self,
         _owner: &str,
@@ -152,6 +195,188 @@ fn encode_path_segment(value: &str) -> String {
         .collect()
 }
 
+fn encode_repository_path(path: &str) -> Result<String, GitHubApiError> {
+    let path = path.trim_matches('/');
+    if path.is_empty() {
+        return Err(GitHubApiError::new(
+            GitHubApiErrorCode::InvalidInput,
+            "repository file path is required",
+            None,
+        ));
+    }
+
+    let mut encoded_segments = Vec::new();
+    for segment in path.split('/') {
+        if segment.is_empty() || segment == "." || segment == ".." {
+            return Err(GitHubApiError::new(
+                GitHubApiErrorCode::InvalidInput,
+                "repository file path contains an unsafe segment",
+                None,
+            ));
+        }
+        encoded_segments.push(encode_path_segment(segment));
+    }
+
+    Ok(encoded_segments.join("/"))
+}
+
+async fn github_error_from_response(response: reqwest::Response) -> GitHubApiError {
+    let status = response.status();
+    let headers = response.headers().clone();
+    let message = response
+        .json::<GitHubErrorResponse>()
+        .await
+        .ok()
+        .and_then(|body| body.message)
+        .unwrap_or_else(|| format!("GitHub API returned HTTP {}", status.as_u16()));
+
+    let code = if is_rate_limited(status.as_u16(), &headers, &message) {
+        GitHubApiErrorCode::RateLimited
+    } else {
+        match status.as_u16() {
+            401 => GitHubApiErrorCode::Unauthorized,
+            403 => GitHubApiErrorCode::Forbidden,
+            404 => GitHubApiErrorCode::NotFound,
+            _ => GitHubApiErrorCode::Unknown,
+        }
+    };
+
+    GitHubApiError::new(code, message, Some(status.as_u16()))
+        .with_retry_after(parse_retry_after_seconds(&headers))
+}
+
+fn is_rate_limited(status: u16, headers: &HeaderMap, message: &str) -> bool {
+    status == 429
+        || headers
+            .get("x-ratelimit-remaining")
+            .and_then(|value| value.to_str().ok())
+            == Some("0")
+        || message.to_lowercase().contains("rate limit")
+}
+
+fn parse_retry_after_seconds(headers: &HeaderMap) -> Option<u64> {
+    headers
+        .get("retry-after")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.parse::<u64>().ok())
+}
+
+fn repository_file_from_content_response(
+    response: GitHubContentResponse,
+) -> Result<RepositoryFileContent, GitHubApiError> {
+    if response.kind != "file" {
+        return Ok(skipped_repository_file(
+            response.path,
+            response.sha,
+            response.size,
+            RepositoryFileSkipReason::Directory,
+        ));
+    }
+
+    if response.size > MAX_TEXT_FILE_BYTES {
+        return Ok(skipped_repository_file(
+            response.path,
+            response.sha,
+            response.size,
+            RepositoryFileSkipReason::TooLarge,
+        ));
+    }
+
+    if response.encoding.as_deref() != Some("base64") {
+        return Ok(skipped_repository_file(
+            response.path,
+            response.sha,
+            response.size,
+            RepositoryFileSkipReason::UnsupportedEncoding,
+        ));
+    }
+
+    let encoded = response.content.ok_or_else(|| {
+        GitHubApiError::new(
+            GitHubApiErrorCode::InvalidResponse,
+            "GitHub file content response did not include file content",
+            None,
+        )
+    })?;
+    let normalized = encoded
+        .chars()
+        .filter(|character| !character.is_whitespace())
+        .collect::<String>();
+    let bytes = BASE64_STANDARD.decode(normalized).map_err(|error| {
+        GitHubApiError::new(GitHubApiErrorCode::InvalidResponse, error.to_string(), None)
+    })?;
+
+    if bytes.len() as u64 > MAX_TEXT_FILE_BYTES {
+        return Ok(skipped_repository_file(
+            response.path,
+            response.sha,
+            bytes.len() as u64,
+            RepositoryFileSkipReason::TooLarge,
+        ));
+    }
+
+    if bytes.contains(&0) {
+        return Ok(skipped_repository_file(
+            response.path,
+            response.sha,
+            response.size,
+            RepositoryFileSkipReason::Binary,
+        ));
+    }
+
+    let Ok(text) = std::str::from_utf8(&bytes) else {
+        return Ok(skipped_repository_file(
+            response.path,
+            response.sha,
+            response.size,
+            RepositoryFileSkipReason::Binary,
+        ));
+    };
+
+    if is_git_lfs_pointer(text) {
+        return Ok(skipped_repository_file(
+            response.path,
+            response.sha,
+            response.size,
+            RepositoryFileSkipReason::GitLfsPointer,
+        ));
+    }
+
+    Ok(RepositoryFileContent {
+        path: response.path,
+        sha: response.sha,
+        size: response.size,
+        content: Some(text.to_owned()),
+        skipped_reason: None,
+    })
+}
+
+fn skipped_repository_file(
+    path: String,
+    sha: String,
+    size: u64,
+    skipped_reason: RepositoryFileSkipReason,
+) -> RepositoryFileContent {
+    RepositoryFileContent {
+        path,
+        sha,
+        size,
+        content: None,
+        skipped_reason: Some(skipped_reason),
+    }
+}
+
+fn is_git_lfs_pointer(text: &str) -> bool {
+    text.starts_with("version https://git-lfs.github.com/spec/v1\n")
+        && text.contains("\noid sha256:")
+        && text.contains("\nsize ")
+}
+
+#[derive(Debug, Deserialize)]
+struct GitHubErrorResponse {
+    message: Option<String>,
+}
+
 #[derive(Debug, Deserialize)]
 struct GitHubOwner {
     login: String,
@@ -180,6 +405,17 @@ struct GitHubBranch {
 #[derive(Debug, Deserialize)]
 struct GitHubBranchCommit {
     sha: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct GitHubContentResponse {
+    path: String,
+    sha: String,
+    size: u64,
+    #[serde(rename = "type")]
+    kind: String,
+    encoding: Option<String>,
+    content: Option<String>,
 }
 
 impl From<GitHubRepo> for Repository {
@@ -228,7 +464,8 @@ struct GitHubTreeEntry {
 #[cfg(test)]
 mod tests {
     use super::GitHubClient;
-    use crate::models::FileChange;
+    use crate::models::{FileChange, GitHubApiErrorCode, RepositoryFileSkipReason};
+    use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
     use std::net::SocketAddr;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
@@ -337,6 +574,123 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn loads_text_file_content_from_github_api() {
+        let body = file_content_body("README.md", "sha-readme", "Hello, DevChat!");
+        let addr = spawn_github_server(&body, |request| {
+            assert!(request
+                .starts_with("GET /repos/colna/ccraft/contents/README.md?ref=feature%2Fmobile "));
+        })
+        .await;
+
+        let client = GitHubClient::with_base_url("ghp_test", &format!("http://{addr}"));
+        let file = client
+            .get_file_content("colna", "ccraft", "feature/mobile", "README.md")
+            .await
+            .unwrap();
+
+        assert_eq!(file.content.as_deref(), Some("Hello, DevChat!"));
+        assert_eq!(file.skipped_reason, None);
+    }
+
+    #[tokio::test]
+    async fn maps_missing_file_content_to_structured_not_found_error() {
+        let addr = spawn_github_server_with_response(
+            404,
+            "",
+            r#"{ "message": "Not Found" }"#,
+            |request| {
+                assert!(
+                    request.starts_with("GET /repos/colna/ccraft/contents/missing.ts?ref=main ")
+                );
+            },
+        )
+        .await;
+
+        let client = GitHubClient::with_base_url("ghp_test", &format!("http://{addr}"));
+        let error = client
+            .get_file_content("colna", "ccraft", "main", "missing.ts")
+            .await
+            .unwrap_err();
+
+        assert_eq!(error.code, GitHubApiErrorCode::NotFound);
+        assert_eq!(error.status, Some(404));
+    }
+
+    #[tokio::test]
+    async fn rejects_unsafe_repository_file_paths_before_requesting_github() {
+        let client = GitHubClient::with_base_url("ghp_test", "http://127.0.0.1:1");
+        let error = client
+            .get_file_content("colna", "ccraft", "main", "../secret.txt")
+            .await
+            .unwrap_err();
+
+        assert_eq!(error.code, GitHubApiErrorCode::InvalidInput);
+    }
+
+    #[tokio::test]
+    async fn maps_rate_limits_to_structured_errors() {
+        let addr = spawn_github_server_with_response(
+            403,
+            "x-ratelimit-remaining: 0\r\nretry-after: 30\r\n",
+            r#"{ "message": "API rate limit exceeded" }"#,
+            |_| {},
+        )
+        .await;
+
+        let client = GitHubClient::with_base_url("ghp_test", &format!("http://{addr}"));
+        let error = client
+            .get_file_content("colna", "ccraft", "main", "src/App.tsx")
+            .await
+            .unwrap_err();
+
+        assert_eq!(error.code, GitHubApiErrorCode::RateLimited);
+        assert_eq!(error.retry_after_seconds, Some(30));
+    }
+
+    #[tokio::test]
+    async fn skips_large_binary_and_lfs_file_content() {
+        let large = client_file_from_body(
+            r#"{
+            "path": "large.log",
+            "sha": "sha-large",
+            "size": 524289,
+            "type": "file",
+            "encoding": "base64",
+            "content": ""
+        }"#,
+        );
+        assert_eq!(
+            large.skipped_reason,
+            Some(RepositoryFileSkipReason::TooLarge)
+        );
+
+        let binary = client_file_from_body(&format!(
+            r#"{{
+                "path": "asset.bin",
+                "sha": "sha-binary",
+                "size": 2,
+                "type": "file",
+                "encoding": "base64",
+                "content": "{}"
+            }}"#,
+            BASE64_STANDARD.encode([0, 1])
+        ));
+        assert_eq!(
+            binary.skipped_reason,
+            Some(RepositoryFileSkipReason::Binary)
+        );
+
+        let lfs_pointer = "version https://git-lfs.github.com/spec/v1\n\
+oid sha256:4cac19622fc3ada9c0fdeadb33f88f367b541f38b89102a3f1261ac81fd5bcb5\n\
+size 84977953\n";
+        let lfs = client_file_from_body(&file_content_body("model.bin", "sha-lfs", lfs_pointer));
+        assert_eq!(
+            lfs.skipped_reason,
+            Some(RepositoryFileSkipReason::GitLfsPointer)
+        );
+    }
+
+    #[tokio::test]
     async fn refuses_empty_commits() {
         let client = GitHubClient::new("token");
         let result = client
@@ -359,12 +713,46 @@ mod tests {
         assert!(result.unwrap_err().to_string().contains("R5.1"));
     }
 
-    async fn spawn_github_server<F>(body: &'static str, assert_request: F) -> SocketAddr
+    fn client_file_from_body(body: &str) -> crate::models::RepositoryFileContent {
+        let content = serde_json::from_str(body).unwrap();
+        super::repository_file_from_content_response(content).unwrap()
+    }
+
+    fn file_content_body(path: &str, sha: &str, text: &str) -> String {
+        format!(
+            r#"{{
+                "path": "{path}",
+                "sha": "{sha}",
+                "size": {},
+                "type": "file",
+                "encoding": "base64",
+                "content": "{}"
+            }}"#,
+            text.len(),
+            BASE64_STANDARD.encode(text.as_bytes())
+        )
+    }
+
+    async fn spawn_github_server<F>(body: &str, assert_request: F) -> SocketAddr
+    where
+        F: FnOnce(&str) + Send + 'static,
+    {
+        spawn_github_server_with_response(200, "", body, assert_request).await
+    }
+
+    async fn spawn_github_server_with_response<F>(
+        status: u16,
+        extra_headers: &str,
+        body: &str,
+        assert_request: F,
+    ) -> SocketAddr
     where
         F: FnOnce(&str) + Send + 'static,
     {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
+        let body = body.to_owned();
+        let extra_headers = extra_headers.to_owned();
         tokio::spawn(async move {
             let (mut socket, _) = listener.accept().await.unwrap();
             let mut buffer = vec![0; 4096];
@@ -372,8 +760,15 @@ mod tests {
             let request = String::from_utf8_lossy(&buffer[..bytes]);
             assert_request(&request);
 
+            let reason = match status {
+                200 => "OK",
+                403 => "Forbidden",
+                404 => "Not Found",
+                429 => "Too Many Requests",
+                _ => "Error",
+            };
             let response = format!(
-                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                "HTTP/1.1 {status} {reason}\r\ncontent-type: application/json\r\n{extra_headers}content-length: {}\r\nconnection: close\r\n\r\n{body}",
                 body.len()
             );
             socket.write_all(response.as_bytes()).await.unwrap();

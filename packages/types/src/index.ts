@@ -47,6 +47,38 @@ export interface Branch {
   protected: boolean;
 }
 
+export type RepositoryFileSkipReason =
+  | "too_large"
+  | "binary"
+  | "git_lfs_pointer"
+  | "unsupported_encoding"
+  | "directory";
+
+export interface RepositoryFileContent {
+  path: string;
+  sha: string;
+  size: number;
+  content?: string;
+  skippedReason?: RepositoryFileSkipReason;
+}
+
+export type GitHubApiErrorCode =
+  | "invalid_input"
+  | "not_found"
+  | "rate_limited"
+  | "unauthorized"
+  | "forbidden"
+  | "invalid_response"
+  | "network"
+  | "unknown";
+
+export interface GitHubApiError {
+  code: GitHubApiErrorCode;
+  message: string;
+  status?: number;
+  retryAfterSeconds?: number;
+}
+
 export interface KeyFile {
   path: string;
   role: string;
