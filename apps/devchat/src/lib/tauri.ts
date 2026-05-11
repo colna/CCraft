@@ -1,4 +1,5 @@
 type CommandArgs = Record<string, unknown>;
+type UnlistenFn = () => void;
 
 const delay = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
 
@@ -15,6 +16,7 @@ export async function invokeCommand<T>(command: string, args: CommandArgs = {}):
     case "has_secret":
     case "delete_secret":
     case "test_ai_connection":
+    case "chat_stream":
     case "github_list_repos":
     case "generate_snapshot":
     case "github_commit_and_push":
@@ -28,4 +30,16 @@ declare global {
   interface Window {
     __TAURI_INTERNALS__?: unknown;
   }
+}
+
+export async function listenCommandEvent<T>(
+  eventName: string,
+  handler: (payload: T) => void
+): Promise<UnlistenFn> {
+  if (!("__TAURI_INTERNALS__" in window)) {
+    return () => {};
+  }
+
+  const { listen } = await import("@tauri-apps/api/event");
+  return listen<T>(eventName, (event) => handler(event.payload));
 }

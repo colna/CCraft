@@ -35,13 +35,13 @@ export const useAIConfigStore = create<AiConfigState>((set, get) => ({
     const config = get().activeConfig;
     set({ connectionStatus: "testing", error: undefined });
     try {
-      const result = await invokeCommand<{ ok: boolean }>("test_ai_connection", {
+      const result = await invokeCommand<boolean>("test_ai_connection", {
         provider: config.provider,
         baseUrl: config.baseUrl,
         model: config.model,
         apiKeySecretRef: config.apiKeySecretRef
       });
-      set({ connectionStatus: result.ok ? "ok" : "error", error: result.ok ? undefined : "连接失败" });
+      set({ connectionStatus: result ? "ok" : "error", error: result ? undefined : "连接失败" });
     } catch (error) {
       set({ connectionStatus: "error", error: error instanceof Error ? error.message : "连接失败" });
     }

@@ -35,7 +35,9 @@ export function ChatPage() {
         {messages.map((message) => (
           <article key={message.id} className={`message-bubble message-${message.role}`}>
             <span>{message.role === "user" ? "用户" : "AI"}</span>
-            <ReactMarkdown>{message.content}</ReactMarkdown>
+            <ReactMarkdown>
+              {message.role === "assistant" && !message.content && isGenerating ? "正在生成..." : message.content}
+            </ReactMarkdown>
           </article>
         ))}
         {pendingDiffs.length > 0 && (
