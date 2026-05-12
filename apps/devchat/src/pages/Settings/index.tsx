@@ -29,6 +29,7 @@ export function SettingsPage() {
   const [draftPreferences, setDraftPreferences] = useState<UserPreferences>(preferences);
   const [apiKey, setApiKey] = useState("");
   const [secretSaveStatus, setSecretSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [secretSaveError, setSecretSaveError] = useState("");
   const [githubToken, setGithubToken] = useState("");
   const [githubSaveStatus, setGithubSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [hasApiKey, setHasApiKey] = useState(false);
@@ -43,6 +44,7 @@ export function SettingsPage() {
     setDraftConfig(activeConfig);
     setApiKey("");
     setSecretSaveStatus("idle");
+    setSecretSaveError("");
   }, [activeConfig]);
 
   useEffect(() => {
@@ -82,13 +84,15 @@ export function SettingsPage() {
         setApiKey("");
         setHasApiKey(true);
         setSecretSaveStatus("saved");
+        setSecretSaveError("");
       }
       await saveConfig(draftConfig);
       await setActive(draftConfig.id);
       setIsAiFormOpen(false);
-    } catch {
+    } catch (error) {
       if (apiKey.trim() && !didSaveSecret) {
         setSecretSaveStatus("error");
+        setSecretSaveError(error instanceof Error ? error.message : "API Key 保存失败，请确认当前运行在 Tauri App 中。");
       }
     }
   };
@@ -97,16 +101,17 @@ export function SettingsPage() {
     const id = `openai-${crypto.randomUUID().slice(0, 8)}`;
     setDraftConfig({
       id,
-      name: "OpenAI-compatible 配置",
-      provider: "openai-compatible",
-      baseUrl: "https://api.openai.com",
-      model: activeConfig.provider === "openai-compatible" ? activeConfig.model : "",
+      name: `${activeConfig.name} 配置`,
+      provider: activeConfig.provider,
+      baseUrl: activeConfig.baseUrl,
+      model: activeConfig.model,
       apiKeySecretRef: `ai.${id}.apiKey`,
       isActive: false
     });
     setApiKey("");
     setHasApiKey(false);
     setSecretSaveStatus("idle");
+    setSecretSaveError("");
     setIsAiFormOpen(true);
   };
 
@@ -286,6 +291,7 @@ export function SettingsPage() {
                 onChange={(event) => {
                   setApiKey(event.target.value);
                   setSecretSaveStatus("idle");
+                  setSecretSaveError("");
                 }}
                 placeholder={hasApiKey ? "留空则继续使用已保存 Key" : "保存到系统安全存储"}
                 type="password"
@@ -314,7 +320,9 @@ export function SettingsPage() {
         {configSaveStatus === "saved" ? <p className="helper-text">配置已保存。</p> : null}
         {configError ? <p className="helper-text warn-text">{configError}</p> : null}
         {secretSaveStatus === "saved" ? <p className="helper-text">API Key 已保存。</p> : null}
-        {secretSaveStatus === "error" ? <p className="helper-text warn-text">请填写有效 API Key 后再保存。</p> : null}
+        {secretSaveStatus === "error" ? (
+          <p className="helper-text warn-text">{secretSaveError || "API Key 保存失败，请确认当前运行在 Tauri App 中。"}</p>
+        ) : null}
       </section>
 
       <section className="settings-card">

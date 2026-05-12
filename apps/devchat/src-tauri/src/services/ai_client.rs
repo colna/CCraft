@@ -1,13 +1,17 @@
 use crate::models::ChatMessage;
 use anyhow::Context;
 use futures_util::{stream, Stream, StreamExt};
+use reqwest::{RequestBuilder, Response};
 use serde::Serialize;
 use serde_json::{json, Value};
 use std::collections::VecDeque;
 use std::pin::Pin;
 
 const ANTHROPIC_VERSION: &str = "2023-06-01";
+const ANTHROPIC_BETA: &str = "claude-code-20250219,interleaved-thinking-2025-05-14";
+const CLAUDE_CLI_USER_AGENT: &str = "claude-cli/2.1.2 (external, cli)";
 const DEFAULT_MAX_TOKENS: u32 = 4096;
+const CONNECTION_TEST_MAX_TOKENS: u32 = 1;
 
 type ChatTextStream = Pin<Box<dyn Stream<Item = anyhow::Result<String>> + Send>>;
 type ByteStream = Pin<Box<dyn Stream<Item = Result<Vec<u8>, reqwest::Error>> + Send>>;
@@ -64,42 +68,46 @@ impl AiClient {
         }
 
         let base_url = self.base_url.trim_end_matches('/');
-        let request = match provider {
-            AiProvider::Claude => self
-                .http
-                .post(format!("{base_url}/v1/messages"))
+        let response = match provider {
+            AiProvider::Claude => {
+                apply_claude_compatible_headers(
+                    self.http.post(append_endpoint(base_url, "/v1/messages")),
+                )
                 .header("x-api-key", &self.api_key)
-                .header("anthropic-version", ANTHROPIC_VERSION)
                 .json(&json!({
                     "model": self.model,
-                    "max_tokens": 8,
-                    "messages": [{ "role": "user", "content": "Reply ok." }]
-                })),
-            AiProvider::OpenAiCompatible => self
-                .http
-                .post(format!("{base_url}/v1/chat/completions"))
-                .bearer_auth(&self.api_key)
-                .json(&OpenAiChatCompletionRequest {
-                    model: &self.model,
-                    stream: false,
-                    messages: vec![OpenAiMessage {
-                        role: "user",
-                        content: "Reply ok.",
-                    }],
-                }),
+                    "max_tokens": CONNECTION_TEST_MAX_TOKENS,
+                    "messages": [{ "role": "user", "content": "Reply ok." }],
+                    "stream": true
+                }))
+                .send()
+                .await?
+            }
+            AiProvider::OpenAiCompatible => {
+                self.http
+                    .post(append_endpoint(base_url, "/v1/chat/completions"))
+                    .bearer_auth(&self.api_key)
+                    .header("content-type", "application/json")
+                    .header("accept", "text/event-stream")
+                    .header("accept-encoding", "identity")
+                    .json(&OpenAiChatCompletionRequest {
+                        model: &self.model,
+                        max_tokens: Some(CONNECTION_TEST_MAX_TOKENS),
+                        stream: true,
+                        messages: vec![OpenAiMessage {
+                            role: "user",
+                            content: "Reply ok.",
+                        }],
+                    })
+                    .send()
+                    .await?
+            }
         };
-        let response = request.send().await?;
         if !response.status().is_success() {
             return Ok(false);
         }
 
-        let value: Value = response.json().await.with_context(|| {
-            format!(
-                "{} connection response was not valid JSON",
-                provider.stream_name()
-            )
-        })?;
-        Ok(validate_connection_response(provider, &value))
+        validate_connection_response(provider, response).await
     }
 
     pub async fn chat_stream(
@@ -117,28 +125,30 @@ impl AiClient {
                 let request_messages = build_claude_messages(messages)?;
                 let system_prompt = system_prompt.trim();
                 let system = (!system_prompt.is_empty()).then_some(system_prompt);
-                self.http
-                    .post(format!("{base_url}/v1/messages"))
-                    .header("x-api-key", &self.api_key)
-                    .header("anthropic-version", ANTHROPIC_VERSION)
-                    .json(&ClaudeMessagesRequest {
-                        model: &self.model,
-                        max_tokens: DEFAULT_MAX_TOKENS,
-                        stream: true,
-                        system,
-                        messages: request_messages,
-                    })
-                    .send()
-                    .await?
-                    .error_for_status()?
+                apply_claude_compatible_headers(
+                    self.http.post(append_endpoint(base_url, "/v1/messages")),
+                )
+                .header("x-api-key", &self.api_key)
+                .json(&ClaudeMessagesRequest {
+                    model: &self.model,
+                    max_tokens: DEFAULT_MAX_TOKENS,
+                    stream: true,
+                    system,
+                    messages: request_messages,
+                })
+                .send()
+                .await?
+                .error_for_status()?
             }
             AiProvider::OpenAiCompatible => {
                 let request_messages = build_openai_messages(messages, system_prompt)?;
                 self.http
-                    .post(format!("{base_url}/v1/chat/completions"))
+                    .post(append_endpoint(base_url, "/v1/chat/completions"))
                     .bearer_auth(&self.api_key)
+                    .header("content-type", "application/json")
                     .json(&OpenAiChatCompletionRequest {
                         model: &self.model,
+                        max_tokens: None,
                         stream: true,
                         messages: request_messages,
                     })
@@ -180,6 +190,8 @@ struct ClaudeMessage<'a> {
 #[derive(Debug, Serialize)]
 struct OpenAiChatCompletionRequest<'a> {
     model: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    max_tokens: Option<u32>,
     stream: bool,
     messages: Vec<OpenAiMessage<'a>>,
 }
@@ -258,7 +270,47 @@ fn build_openai_messages<'a>(
     Ok(request_messages)
 }
 
-fn validate_connection_response(provider: AiProvider, value: &Value) -> bool {
+async fn validate_connection_response(
+    provider: AiProvider,
+    response: Response,
+) -> anyhow::Result<bool> {
+    if response
+        .headers()
+        .get("content-type")
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|content_type| content_type.contains("text/event-stream"))
+    {
+        return validate_connection_stream(provider, response).await;
+    }
+
+    let value: Value = response.json().await.with_context(|| {
+        format!(
+            "{} connection response was not valid JSON",
+            provider.stream_name()
+        )
+    })?;
+    Ok(validate_connection_json(provider, &value))
+}
+
+async fn validate_connection_stream(
+    provider: AiProvider,
+    response: Response,
+) -> anyhow::Result<bool> {
+    let mut stream = response.bytes_stream();
+    let mut buffer = Vec::new();
+
+    while let Some(chunk) = stream.next().await {
+        buffer.extend_from_slice(&chunk?);
+        let batch = drain_sse_text_deltas(&mut buffer, provider)?;
+        if !batch.deltas.is_empty() || batch.done {
+            return Ok(true);
+        }
+    }
+
+    Ok(false)
+}
+
+fn validate_connection_json(provider: AiProvider, value: &Value) -> bool {
     match provider {
         AiProvider::Claude => {
             value.get("type").and_then(Value::as_str) == Some("message")
@@ -285,6 +337,56 @@ fn validate_connection_response(provider: AiProvider, value: &Value) -> bool {
                     })
                 })
         }
+    }
+}
+
+fn apply_claude_compatible_headers(request: RequestBuilder) -> RequestBuilder {
+    request
+        .header("anthropic-version", ANTHROPIC_VERSION)
+        .header("anthropic-beta", ANTHROPIC_BETA)
+        .header("anthropic-dangerous-direct-browser-access", "true")
+        .header("content-type", "application/json")
+        .header("accept", "application/json")
+        .header("accept-encoding", "identity")
+        .header("accept-language", "*")
+        .header("user-agent", CLAUDE_CLI_USER_AGENT)
+        .header("x-app", "cli")
+        .header("x-stainless-lang", "js")
+        .header("x-stainless-package-version", "0.70.0")
+        .header("x-stainless-runtime", "node")
+        .header("x-stainless-runtime-version", "v22.20.0")
+        .header("x-stainless-retry-count", "0")
+        .header("x-stainless-timeout", "600")
+        .header("sec-fetch-mode", "cors")
+        .header("x-stainless-os", os_name())
+        .header("x-stainless-arch", arch_name())
+}
+
+fn os_name() -> &'static str {
+    match std::env::consts::OS {
+        "macos" => "MacOS",
+        "linux" => "Linux",
+        "windows" => "Windows",
+        other => other,
+    }
+}
+
+fn arch_name() -> &'static str {
+    match std::env::consts::ARCH {
+        "aarch64" => "arm64",
+        "x86_64" => "x86_64",
+        "x86" => "x86",
+        other => other,
+    }
+}
+
+fn append_endpoint(base_url: &str, endpoint: &str) -> String {
+    let base = base_url.trim_end_matches('/');
+    let endpoint_without_version = endpoint.trim_start_matches("/v1/");
+    if base.ends_with("/v1") {
+        format!("{base}/{endpoint_without_version}")
+    } else {
+        format!("{base}{endpoint}")
     }
 }
 
@@ -503,7 +605,7 @@ fn parse_openai_sse_event(value: &Value) -> anyhow::Result<ParsedSseEvent> {
 
 #[cfg(test)]
 mod tests {
-    use super::{drain_sse_text_deltas, AiClient, AiProvider};
+    use super::{append_endpoint, drain_sse_text_deltas, AiClient, AiProvider};
     use crate::models::ChatMessage;
     use futures_util::TryStreamExt;
     use std::net::SocketAddr;
@@ -611,6 +713,10 @@ mod tests {
         let addr = spawn_claude_stream_server(body, |request| {
             assert!(request.starts_with("POST /v1/messages"));
             assert!(request.contains("anthropic-version: 2023-06-01"));
+            assert!(request
+                .contains("anthropic-beta: claude-code-20250219,interleaved-thinking-2025-05-14"));
+            assert!(request.contains("user-agent: claude-cli/2.1.2 (external, cli)"));
+            assert!(request.contains("x-app: cli"));
             assert!(request.contains("\"stream\":true"));
             assert!(request.contains("\"system\":\"Use repo context.\""));
             assert!(request.contains("\"role\":\"user\""));
@@ -650,6 +756,7 @@ mod tests {
         let addr = spawn_openai_stream_server(body, |request| {
             assert!(request.starts_with("POST /v1/chat/completions"));
             assert!(request.contains("authorization: Bearer secret"));
+            assert!(request.contains("content-type: application/json"));
             assert!(request.contains("\"stream\":true"));
             assert!(request.contains("\"role\":\"system\""));
             assert!(request.contains("\"content\":\"Use repo context.\""));
@@ -753,6 +860,22 @@ data: {"type":"error","error":{"type":"overloaded_error","message":"try later"}}
         assert!(error.to_string().contains("malformed JSON"));
     }
 
+    #[test]
+    fn endpoint_builder_accepts_base_urls_with_or_without_v1() {
+        assert_eq!(
+            append_endpoint("https://api.example.com", "/v1/chat/completions"),
+            "https://api.example.com/v1/chat/completions"
+        );
+        assert_eq!(
+            append_endpoint("https://api.example.com/v1", "/v1/chat/completions"),
+            "https://api.example.com/v1/chat/completions"
+        );
+        assert_eq!(
+            append_endpoint("https://api.example.com/v1/", "/v1/messages"),
+            "https://api.example.com/v1/messages"
+        );
+    }
+
     async fn spawn_claude_server(status_code: u16) -> SocketAddr {
         spawn_claude_server_with_body(
             status_code,
@@ -771,7 +894,12 @@ data: {"type":"error","error":{"type":"overloaded_error","message":"try later"}}
             let request = String::from_utf8_lossy(&buffer[..bytes]);
             assert!(request.starts_with("POST /v1/messages"));
             assert!(request.contains("anthropic-version: 2023-06-01"));
+            assert!(request
+                .contains("anthropic-beta: claude-code-20250219,interleaved-thinking-2025-05-14"));
+            assert!(request.contains("user-agent: claude-cli/2.1.2 (external, cli)"));
+            assert!(request.contains("x-app: cli"));
             assert!(request.contains("claude-haiku-4-5-20251001"));
+            assert!(request.contains("\"stream\":true"));
 
             let response = format!(
                 "HTTP/1.1 {status_code} OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
@@ -801,6 +929,8 @@ data: {"type":"error","error":{"type":"overloaded_error","message":"try later"}}
             assert!(request.starts_with("POST /v1/chat/completions"));
             assert!(request.contains("authorization: Bearer secret"));
             assert!(request.contains("gpt-4.1-mini"));
+            assert!(request.contains("\"max_tokens\":1"));
+            assert!(request.contains("\"stream\":true"));
 
             let response = format!(
                 "HTTP/1.1 {status_code} OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",

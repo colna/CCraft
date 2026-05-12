@@ -53,6 +53,7 @@ function userConfigWithActive(id: string): UserConfig {
 
 describe("SettingsPage", () => {
   beforeEach(() => {
+    tauriMock.invokeCommand.mockReset();
     tauriMock.invokeCommand.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
       if (command === "load_user_config") {
         return userConfig;
@@ -113,6 +114,9 @@ describe("SettingsPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "新增 AI 配置" }));
 
     expect(screen.getByLabelText("AI Provider")).toBeTruthy();
+    expect((screen.getByLabelText("Base URL") as HTMLInputElement).value).toBe("https://api.anthropic.com");
+    expect((screen.getByLabelText("Model Id") as HTMLInputElement).value).toBe("claude-sonnet-4-5");
+    fireEvent.change(screen.getByLabelText("AI Provider"), { target: { value: "openai-compatible" } });
     fireEvent.change(screen.getByLabelText("AI API Key"), { target: { value: "test-api-key" } });
     fireEvent.change(screen.getByLabelText("配置名称"), {
       target: { value: "Production OpenAI" }
@@ -148,6 +152,32 @@ describe("SettingsPage", () => {
     expect(JSON.stringify(saveConfigCall?.[1])).not.toContain("test-api-key");
 
     randomSpy.mockRestore();
+  });
+
+  it("shows the real secret storage error instead of marking the key invalid", async () => {
+    tauriMock.invokeCommand.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
+      if (command === "load_user_config") {
+        return userConfig;
+      }
+      if (command === "has_secret") {
+        return args?.key === "ai.claude-work.apiKey";
+      }
+      if (command === "save_secret") {
+        throw new Error("真实功能需要在 Tauri App 运行时中使用");
+      }
+      throw new Error(`unexpected command ${command}`);
+    });
+
+    render(<SettingsPage />);
+    fireEvent.click(screen.getByRole("button", { name: "新增 AI 配置" }));
+    fireEvent.change(screen.getByLabelText("AI API Key"), { target: { value: "test-api-key" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存配置" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("真实功能需要在 Tauri App 运行时中使用")).toBeTruthy();
+    });
+    expect(screen.queryByText("请填写有效 API Key 后再保存。")).toBeNull();
+    expect(tauriMock.invokeCommand).not.toHaveBeenCalledWith("save_ai_config", expect.anything());
   });
 
   it("activates the selected config from the dropdown", async () => {
