@@ -1,5 +1,5 @@
 import type { AiConfig, AiProvider, UserPreferences } from "@devchat/types";
-import { Github, KeyRound, Plus, Save, Trash2 } from "lucide-react";
+import { Github, KeyRound, Link2, Plus, Save, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { StatusPill } from "../../components/StatusPill";
 import { invokeCommand } from "../../lib/tauri";
@@ -32,6 +32,8 @@ export function SettingsPage() {
   const [githubToken, setGithubToken] = useState("");
   const [githubSaveStatus, setGithubSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [hasApiKey, setHasApiKey] = useState(false);
+  const [isAiFormOpen, setIsAiFormOpen] = useState(false);
+  const isDraftPersisted = configs.some((config) => config.id === draftConfig.id);
 
   useEffect(() => {
     void loadConfig();
@@ -39,6 +41,8 @@ export function SettingsPage() {
 
   useEffect(() => {
     setDraftConfig(activeConfig);
+    setApiKey("");
+    setSecretSaveStatus("idle");
   }, [activeConfig]);
 
   useEffect(() => {
@@ -69,22 +73,23 @@ export function SettingsPage() {
   }, [draftConfig.apiKeySecretRef]);
 
   const saveDraftConfig = async () => {
+    let didSaveSecret = false;
     try {
-      await saveConfig(draftConfig);
-    } catch {
-    }
-  };
-
-  const activateDraftConfig = async () => {
-    try {
-      const savedConfig = configs.some((config) => config.id === draftConfig.id);
-      if (!savedConfig) {
-        await saveConfig({ ...draftConfig, isActive: true });
-        return;
+      if (apiKey.trim()) {
+        setSecretSaveStatus("saving");
+        await invokeCommand("save_secret", { key: draftConfig.apiKeySecretRef, value: apiKey.trim() });
+        didSaveSecret = true;
+        setApiKey("");
+        setHasApiKey(true);
+        setSecretSaveStatus("saved");
       }
-
+      await saveConfig(draftConfig);
       await setActive(draftConfig.id);
+      setIsAiFormOpen(false);
     } catch {
+      if (apiKey.trim() && !didSaveSecret) {
+        setSecretSaveStatus("error");
+      }
     }
   };
 
@@ -99,12 +104,30 @@ export function SettingsPage() {
       apiKeySecretRef: `ai.${id}.apiKey`,
       isActive: false
     });
+    setApiKey("");
     setHasApiKey(false);
+    setSecretSaveStatus("idle");
+    setIsAiFormOpen(true);
   };
 
   const deleteDraftConfig = async () => {
     try {
       await deleteConfig(draftConfig.id);
+      setIsAiFormOpen(false);
+    } catch {
+    }
+  };
+
+  const testSelectedConfig = async () => {
+    if (!isDraftPersisted) {
+      return;
+    }
+
+    try {
+      if (activeConfig.id !== draftConfig.id) {
+        await setActive(draftConfig.id);
+      }
+      await testConnection();
     } catch {
     }
   };
@@ -113,23 +136,6 @@ export function SettingsPage() {
     try {
       await updatePreferences(draftPreferences);
     } catch {
-    }
-  };
-
-  const saveApiKey = async () => {
-    if (!apiKey.trim()) {
-      setSecretSaveStatus("error");
-      return;
-    }
-
-    setSecretSaveStatus("saving");
-    try {
-      await invokeCommand("save_secret", { key: draftConfig.apiKeySecretRef, value: apiKey.trim() });
-      setApiKey("");
-      setHasApiKey(true);
-      setSecretSaveStatus("saved");
-    } catch {
-      setSecretSaveStatus("error");
     }
   };
 
@@ -180,111 +186,131 @@ export function SettingsPage() {
       <section className="settings-card">
         <div className="section-heading">
           <h2><KeyRound size={18} /> AI 模型配置</h2>
+          <button className="icon-link" type="button" aria-label="新增 AI 配置" onClick={createDraftConfig}>
+            <Plus size={18} />
+          </button>
+        </div>
+
+        <div className="config-picker-row">
+          <label className="field-block">
+            <span>当前配置</span>
+            <select
+              aria-label="当前 AI 配置"
+              value={draftConfig.id}
+              onChange={(event) => {
+                const selected = configs.find((config) => config.id === event.target.value);
+                if (!selected) return;
+                setDraftConfig(selected);
+                setApiKey("");
+                setSecretSaveStatus("idle");
+                void setActive(selected.id);
+              }}
+            >
+              {configs.map((config) => (
+                <option key={config.id} value={config.id}>
+                  {config.name}
+                </option>
+              ))}
+              {!configs.some((config) => config.id === draftConfig.id) ? (
+                <option value={draftConfig.id}>{draftConfig.name}</option>
+              ) : null}
+            </select>
+          </label>
+          <button
+            className="icon-link"
+            type="button"
+            aria-label="测试 AI 连接"
+            onClick={testSelectedConfig}
+            disabled={!isDraftPersisted || connectionStatus === "testing"}
+          >
+            <Link2 size={18} />
+          </button>
+          <button
+            className="danger-action"
+            type="button"
+            aria-label="删除当前 AI 配置"
+            onClick={deleteDraftConfig}
+            disabled={configs.length <= 1 || !isDraftPersisted}
+          >
+            <Trash2 size={16} />
+          </button>
+        </div>
+
+        <div className="config-summary-row">
           <StatusPill tone={connectionStatus === "ok" ? "ok" : connectionStatus === "error" ? "warn" : "info"}>
-            {connectionStatus === "testing" ? "测试中" : connectionStatus === "ok" ? "可用" : connectionStatus === "error" ? "失败" : "待测试"}
+            {connectionStatus === "testing" ? "测试中" : connectionStatus === "ok" ? "连接可用" : connectionStatus === "error" ? "连接失败" : "待测试"}
           </StatusPill>
+          <StatusPill tone={hasApiKey ? "ok" : "info"}>{hasApiKey ? "Key 已保存" : "Key 未配置"}</StatusPill>
+          <button className="text-action" type="button" onClick={() => setIsAiFormOpen((value) => !value)}>
+            {isAiFormOpen ? "收起表单" : "编辑配置"}
+          </button>
         </div>
-        <label className="field-block">
-          <span>配置</span>
-          <select
-            aria-label="AI 配置"
-            value={draftConfig.id}
-            onChange={(event) => {
-              const selected = configs.find((config) => config.id === event.target.value);
-              if (selected) setDraftConfig(selected);
-            }}
-          >
-            {configs.map((config) => (
-              <option key={config.id} value={config.id}>
-                {config.isActive ? "当前 · " : ""}{config.name}
-              </option>
-            ))}
-            {!configs.some((config) => config.id === draftConfig.id) ? (
-              <option value={draftConfig.id}>{draftConfig.name}</option>
-            ) : null}
-          </select>
-        </label>
-        <label className="field-block">
-          <span>配置名称</span>
-          <input
-            value={draftConfig.name}
-            onChange={(event) => setDraftConfig((config) => ({ ...config, name: event.target.value }))}
-          />
-        </label>
-        <label className="field-block">
-          <span>Provider</span>
-          <select
-            aria-label="AI Provider"
-            value={draftConfig.provider}
-            onChange={(event) =>
-              setDraftConfig((config) => applyProviderDefaults(config, event.target.value as AiProvider))
-            }
-          >
-            {AI_PROVIDER_OPTIONS.map((provider) => (
-              <option key={provider.value} value={provider.value}>
-                {provider.label}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="field-block">
-          <span>Base URL</span>
-          <input
-            value={draftConfig.baseUrl}
-            onChange={(event) => setDraftConfig((config) => ({ ...config, baseUrl: event.target.value }))}
-          />
-        </label>
-        <label className="field-block">
-          <span>所选配置 API Key</span>
-          <input value={hasApiKey ? "已安全保存" : "未配置"} readOnly />
-        </label>
-        <label className="field-block">
-          <span>保存 API Key</span>
-          <input
-            aria-label="AI API Key"
-            autoComplete="off"
-            onChange={(event) => {
-              setApiKey(event.target.value);
-              setSecretSaveStatus("idle");
-            }}
-            placeholder="只会保存到系统安全存储"
-            type="password"
-            value={apiKey}
-          />
-        </label>
-        <label className="field-block">
-          <span>Model</span>
-          <input
-            value={draftConfig.model}
-            placeholder={draftConfig.provider === "openai-compatible" ? "兼容服务的模型名" : "Claude 模型名"}
-            onChange={(event) => setDraftConfig((config) => ({ ...config, model: event.target.value }))}
-          />
-        </label>
-        <label className="field-block">
-          <span>Secret Ref</span>
-          <input
-            value={draftConfig.apiKeySecretRef}
-            onChange={(event) => setDraftConfig((config) => ({ ...config, apiKeySecretRef: event.target.value }))}
-          />
-        </label>
-        <div className="settings-actions">
-          <button className="secondary-action" type="button" onClick={createDraftConfig}>
-            <Plus size={16} /> 新增
-          </button>
-          <button className="secondary-action" type="button" onClick={saveDraftConfig}>
-            <Save size={16} /> 保存配置
-          </button>
-          <button className="secondary-action" type="button" onClick={activateDraftConfig}>
-            设为激活
-          </button>
-          <button className="secondary-action" type="button" onClick={deleteDraftConfig} disabled={configs.length <= 1}>
-            <Trash2 size={16} /> 删除
-          </button>
-          <button className="secondary-action" type="button" onClick={saveApiKey}>
-            {secretSaveStatus === "saving" ? "保存中" : "保存 Key"}
-          </button>
-          <button className="secondary-action" type="button" onClick={testConnection}>测试连接</button>
-        </div>
+
+        {isAiFormOpen ? (
+          <div className="config-form-panel">
+            <label className="field-block">
+              <span>配置名称</span>
+              <input
+                value={draftConfig.name}
+                onChange={(event) => setDraftConfig((config) => ({ ...config, name: event.target.value }))}
+              />
+            </label>
+            <label className="field-block">
+              <span>Provider</span>
+              <select
+                aria-label="AI Provider"
+                value={draftConfig.provider}
+                onChange={(event) =>
+                  setDraftConfig((config) => applyProviderDefaults(config, event.target.value as AiProvider))
+                }
+              >
+                {AI_PROVIDER_OPTIONS.map((provider) => (
+                  <option key={provider.value} value={provider.value}>
+                    {provider.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="field-block">
+              <span>Base URL</span>
+              <input
+                value={draftConfig.baseUrl}
+                onChange={(event) => setDraftConfig((config) => ({ ...config, baseUrl: event.target.value }))}
+              />
+            </label>
+            <label className="field-block">
+              <span>API Key</span>
+              <input
+                aria-label="AI API Key"
+                autoComplete="off"
+                onChange={(event) => {
+                  setApiKey(event.target.value);
+                  setSecretSaveStatus("idle");
+                }}
+                placeholder={hasApiKey ? "留空则继续使用已保存 Key" : "保存到系统安全存储"}
+                type="password"
+                value={apiKey}
+              />
+            </label>
+            <label className="field-block">
+              <span>Model Id</span>
+              <input
+                value={draftConfig.model}
+                placeholder={draftConfig.provider === "openai-compatible" ? "兼容服务的模型名" : "Claude 模型名"}
+                onChange={(event) => setDraftConfig((config) => ({ ...config, model: event.target.value }))}
+              />
+            </label>
+            <button
+              className="primary-action"
+              type="button"
+              onClick={saveDraftConfig}
+              disabled={configSaveStatus === "saving" || secretSaveStatus === "saving"}
+            >
+              <Save size={16} /> {configSaveStatus === "saving" || secretSaveStatus === "saving" ? "保存中" : "保存配置"}
+            </button>
+          </div>
+        ) : null}
+
         {configSaveStatus === "saved" ? <p className="helper-text">配置已保存。</p> : null}
         {configError ? <p className="helper-text warn-text">{configError}</p> : null}
         {secretSaveStatus === "saved" ? <p className="helper-text">API Key 已保存。</p> : null}
