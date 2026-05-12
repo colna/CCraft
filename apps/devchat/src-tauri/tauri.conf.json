@@ -27,7 +27,7 @@
       "mobile": [
         {
           "host": "callback",
-          "pathPrefix": "/github"
+          "pathPrefix": ["/github"]
         }
       ],
       "desktop": {
